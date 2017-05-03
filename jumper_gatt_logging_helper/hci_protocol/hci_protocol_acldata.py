@@ -15,7 +15,8 @@ AttMtuReqPacketConstruct = "att_mtu_req_packet" / Struct(
 
 AttOpWriteRequestConstruct = "attribute_write_request" / Struct(
     "handle" / Int16ul,
-    "data" / Bytes(this._._.length - 3)
+    "data" / BytesInteger(this._._.length - 3, swapped=True)
+    # "data" / Bytes(this._._.length - 3)
 )
 
 
@@ -65,10 +66,11 @@ AttCmdPacketConstruct = "att_cmd_packet" / Struct(
 )
 
 L2CapPacketConstruct = "l2cap_packet" / Struct(
-    "length" / Int16ul, #Rebuild(Int16ul, len_(this.payload)),
+    "length" / Int16ul,
+    # "length" / Rebuild(Int16ul, lambda x: AttCmdPacketConstruct.sizeof(x.payload)),
     "cid" / Int16ul,
     "payload" / Switch(this.cid, {
-        4: AttCmdPacketConstruct
+        ATT_CID: AttCmdPacketConstruct
     }, default=Array(this.length, Byte))
 )
 
@@ -79,27 +81,27 @@ HciAclDataPacketConstruct = "hci_acl_data_packet" / Struct(
             "handle" / BitsInteger(12)
         )
     )),
-    "length" / Int16ul, #Rebuild(Int16ul, len_(this.payload)),
+    # "length" / Int16ul, #Rebuild(Int16ul, len_(this.payload)),
+    "length" / Rebuild(Int16ul, this.payload.length + 4),
     "payload" / L2CapPacketConstruct
 )
 
 
-def create_write_request_acl_packet(connection_handle, handle, data):
-    return HciAclDataPacketConstruct.build(
-        dict(
-            flags=0,
-            handle=connection_handle,
-            length=5 + len(data),
-            payload=dict(
-                length=3 + len(data),
-                cid=ATT_CID,
-                payload=dict(
-                    opcode='ATT_OP_WRITE_REQ',
-                    payload=dict(
-                        handle=handle,
-                        data=data
-                    )
-                )
-            )
-        )
-    )
+# def create_write_request_acl_packet(connection_handle, handle, data, num_bytes_for_data):
+#     return HciAclDataPacketConstruct.build(
+#         dict(
+#             flags=0,
+#             handle=connection_handle,
+#             payload=dict(
+#                 length=3 + num_bytes_for_data,
+#                 cid=ATT_CID,
+#                 payload=dict(
+#                     opcode='ATT_OP_WRITE_REQ',
+#                     payload=dict(
+#                         handle=handle,
+#                         data=data
+#                     )
+#                 )
+#             )
+#         )
+#     )

@@ -1,9 +1,8 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import logging
 from construct import *
-import hci_protocol
-from hci_protocol_acldata import ATT_CID
+
+from hci_protocol import hci_protocol
 
 NOTIFY_ON = 1
 
@@ -21,4 +20,4 @@ def parse_characteristic_declaration(value):
 
 
 def create_start_notifying_on_handle_packet(connection_handle, handle):
-    hci_protocol.create_write_request_packet(connection_handle, handle+1, NOTIFY_ON)
+    return hci_protocol.create_write_request_packet(connection_handle, handle + 1, NOTIFY_ON, 2)

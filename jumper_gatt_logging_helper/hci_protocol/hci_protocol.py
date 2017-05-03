@@ -1,8 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import logging
+
 from construct import *
-from hci_protocol_acldata import HciAclDataPacketConstruct, create_write_request_acl_packet
+
+from hci_protocol.hci_protocol_acldata import HciAclDataPacketConstruct, ATT_CID
 
 log = logging.getLogger(__name__)
 
@@ -141,10 +143,24 @@ HciPacketConstruct = "hci_packet" / Struct(
 )
 
 
-def create_write_request_packet(connection_handle, handle, data):
-    HciPacketConstruct.build(
+def create_write_request_packet(connection_handle, handle, data, num_bytes_for_data):
+    return HciPacketConstruct.build(
         dict(
             type='HCI_ACLDATA_PKT',
-            payload=create_write_request_acl_packet(connection_handle, handle, data)
+            payload=dict(
+                flags=0,
+                handle=connection_handle,
+                payload=dict(
+                    length=3 + num_bytes_for_data,
+                    cid=ATT_CID,
+                    payload=dict(
+                        opcode='ATT_OP_WRITE_REQ',
+                        payload=dict(
+                            handle=handle,
+                            data=data
+                        )
+                    )
+                )
+            )
         )
     )

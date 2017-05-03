@@ -1,162 +1,224 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import socket
-import pty
-import os
-import subprocess
-import select
-import struct
-import logging
 import argparse
+import collections
+import logging
+import os
+import pty
+import select
+import subprocess
+from Queue import Queue
 from StringIO import StringIO
 from io import SEEK_CUR
 
-import collections
-import construct
-from construct import FieldError, RawCopy, Rebuffered
-from hci_protocol import HciPacketConstruct
-from hci_protocol_acldata import ATT_CID
+from construct import RawCopy
+from hci_protocol.hci_channel_user_socket import create_bt_socket_hci_channel_user
+from hci_protocol.hci_protocol_acldata import ATT_CID
+
 import gatt_protocol
+from hci_protocol.hci_protocol import HciPacketConstruct
 
-CHARACTARISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
+CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+# log.setLevel(logging.DEBUG)
 
 
 class HciProxy(object):
-    def __init__(self, hci_device_number=0):
-        self._hci_socket = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI)
-        self._hci_socket.setsockopt(socket.SOL_HCI, socket.HCI_DATA_DIR, 1)
-        self._hci_socket.setsockopt(socket.SOL_HCI, socket.HCI_TIME_STAMP, 1)
-        self._hci_socket.setsockopt(
-            socket.SOL_HCI, socket.HCI_FILTER, struct.pack("IIIH2x", 0xffffffffL, 0xffffffffL, 0xffffffffL, 0)
-        )
-        self._hci_socket.bind((hci_device_number,))
+    def __init__(self, hci_device_number=0, logger=None):
+        self._logger = logger or logging.getLogger(__name__)
+
+        self._hci_device_number = hci_device_number
+        try:
+            subprocess.check_call(['hciconfig', self.hci_device_name, 'down'])
+        except subprocess.CalledProcessError:
+            self._logger.error('Could not run hciconfig down command for HCI device')
+            raise
+        self._hci_socket = create_bt_socket_hci_channel_user(hci_device_number)
+        self._logger.info('bind to %s complete', self.hci_device_name)
 
         self._pty_master, pty_slave = pty.openpty()
-        self.pty_f = os.fdopen(self._pty_master, 'rwb')
+        self._pty_fd = os.fdopen(self._pty_master, 'rwb')
         hci_tty = os.ttyname(pty_slave)
-        log.info('TTY Slave: {}'.format(hci_tty))
-        raw_input("Enter to continue")
-        output = subprocess.check_output(['hciattach', hci_tty, 'any'])
-        if output != 'Device setup complete\n':
-            raise RuntimeError("Could not run hciattach on PTY device. Output from call command is: {}".format(output))
+        self._logger.info('TTY slave for the virtual HCI: %s', hci_tty)
+        try:
+            subprocess.check_call(['hciattach', hci_tty, 'any'])
+        except subprocess.CalledProcessError:
+            self._logger.error('Could not run hciattach on PTY device')
+            raise
 
-        # output = subprocess.check_output(['hciconfig', 'hci1', 'up'])
-        self._inputs = [self.pty_f, self._hci_socket]
-        self._hci_device_number = hci_device_number
+        self._inputs = [self._pty_fd, self._hci_socket]
 
         self._pty_buffer = StringIO()
+        self._gatt_logger = GattLogger(self._logger)
 
-        self.state = State(
-            connection_handle=None, log_handle=None, awaiting_my_write_response=False, pending_write_requests=[]
-        )
+    @property
+    def hci_device_name(self):
+        return 'hci{}'.format(self._hci_device_number)
 
     def run(self):
         while True:
             readable, _, _ = select.select(self._inputs, [], [])
             for s in readable:
-                if s is self.pty_f:
+                if s is self._pty_fd:
+                    source = 'pty'
                     data = os.read(self._pty_master, 4096)
-                    log.debug('Raw PTY data: %s', repr(data))
+                    self._logger.debug('Raw PTY data: %s', repr(data))
+
                     self._pty_buffer.write(data)
                     self._pty_buffer.seek(-len(data), SEEK_CUR)
+
                     parsed_packet = RawCopy(HciPacketConstruct).parse_stream(self._pty_buffer)
-                    # packet = HciPacketConstruct.parse_stream(self._pty_buffer)
-                    # packet = os.read(self._pty_master, 4096)
-                    log.debug('PTY: %s', parsed_packet)
-                    self._hci_socket.sendall(parsed_packet.data)
+                    packet = parsed_packet.data
+                    self._logger.debug('PTY: %s', parsed_packet)
+
                 elif s is self._hci_socket:
+                    source = 'socket'
                     packet = self._hci_socket.recv(4096)
-                    log.debug('SOCKET: %s', RawCopy(HciPacketConstruct).parse(packet))
-                    action = handle_packet(packet, self.state)
-                    log.debug('Action: %s', action)
-                    self.state = action.new_state
+                    self._logger.debug('SOCKET: %s', RawCopy(HciPacketConstruct).parse(packet))
 
-                    if action.packet_to_send_to_socket is not None:
-                        log.debug(
-                            'Sending additional packet: %s',
-                            RawCopy(HciPacketConstruct).parse(action.packet_to_send_to_socket)
-                        )
-                        self._hci_socket.sendall(action.packet_to_send_to_socket)
+                action = self._gatt_logger.handle_message(packet, source)
+                self._logger.debug('Action: %s', action)
 
-                    if action.packet_to_send_to_pty is not None:
-                        log.debug(
-                            'Sending additional PTY: %s',
-                            RawCopy(HciPacketConstruct).parse(action.packet_to_send_to_pty)
-                        )
-                        os.write(self._pty_master, action.packet_to_send_to_pty)
+                for packet in action.packets_to_send_to_socket:
+                    self._logger.debug(
+                        'Sending to socket: %s',
+                        RawCopy(HciPacketConstruct).parse(packet)
+                    )
+                    self._hci_socket.sendall(packet)
 
-                    if not action.should_block_current_packet:
-                        log.debug('Sending packet to PTY')
-                        os.write(self._pty_master, packet)
-
-
-class State(collections.namedtuple('_State', [
-    'connection_handle',
-    'log_handle',
-    'awaiting_my_write_response',
-    'pending_write_requests',
-])):
-    def modify(self, **kwargs):
-        key_values = {k: getattr(self, k) for k in self._fields}
-        key_values.update(kwargs)
-        return State(**key_values)
+                if len(action.packets_to_send_to_pty) == 0:
+                    self._logger.debug('Skipping PTY')
+                for packet in action.packets_to_send_to_pty:
+                    self._logger.debug(
+                        'Sending to PTY: %s',
+                        RawCopy(HciPacketConstruct).parse(packet)
+                    )
+                    os.write(self._pty_master, packet)
 
 
 Action = collections.namedtuple(
-    'Action', 'new_state should_block_current_packet packet_to_send_to_socket packet_to_send_to_pty'
+    'Action', 'packets_to_send_to_socket packets_to_send_to_pty'
 )
 
 
-def handle_packet(packet, state):
-    try:
-        parsed_packet = HciPacketConstruct.parse(packet)
-    except:
-        log.warn('parsing exception')
-        parsed_packet = None
-        raise
+def get_default_action(packet, source):
+    if source == 'socket':
+        return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[packet])
+    elif source == 'pty':
+        return Action(packets_to_send_to_socket=[packet], packets_to_send_to_pty=[])
 
-    if parsed_packet:
-        if is_read_bd_addr_command_complete_event_packet(parsed_packet):
-            new_packet = parsed_packet
-            new_packet.payload.payload.payload = '00:1a:7d:da:71:01'
-            new_packet_encoded = HciPacketConstruct.build(new_packet)
-            return Action(
-                new_state=state,
-                should_block_current_packet=True,
-                packet_to_send_to_socket=None,
-                packet_to_send_to_pty=new_packet_encoded
-            )
+
+class GattLogger(object):
+    def __init__(self, logger=None):
+        self._logger = logger or logging.getLogger(__name__)
+        self._peripherals_loggers = dict()
+
+    def parse_hci_packet(self, packet):
+        try:
+            return RawCopy(HciPacketConstruct).parse(packet)
+        except:
+            self._logger.error('Exception during packet parsing')
+            return None
+
+    def handle_message(self, packet, source):
+        parsed_packet_with_raw_data = self.parse_hci_packet(packet)
+
+        if parsed_packet_with_raw_data is not None:
+            parsed_packet = parsed_packet_with_raw_data.value
+
+            if is_acl_data_packet(parsed_packet):
+                connection_handle = get_connection_handle_from_acl_data_packet(parsed_packet)
+                if connection_handle in self._peripherals_loggers:
+                    peripheral_logger = self._peripherals_loggers[connection_handle]
+                    return peripheral_logger.handle_message(parsed_packet_with_raw_data, source)
+                else:
+                    self._logger.warn(
+                        'Received ACL data packet for an unfamiliar connection handle: %d. \
+This packet will be ignored by the logger',
+                        connection_handle
+                    )
+
+            elif is_le_connection_complete_event(parsed_packet):
+                connection_handle = get_connection_handle_from_connection_complete_event_packet(parsed_packet)
+                self._logger.info('Connected to device. Connection handle: %d', connection_handle)
+                self._peripherals_loggers[connection_handle] = GattPeripheralLogger(connection_handle, self._logger)
+
+            elif is_le_disconnection_complete_event(parsed_packet):
+                connection_handle = get_connection_handle_from_disconnection_complete_event_packet(parsed_packet)
+                if connection_handle in self._peripherals_loggers:
+                    self._peripherals_loggers.pop(connection_handle)
+                else:
+                    self._logger.warn(
+                        'Received disconnection event for an unfamiliar connection handle: %d', connection_handle
+                    )
+
+            return get_default_action(packet, source)
+
+
+class GattPeripheralLogger(object):
+    def __init__(self, connection_handle, logger=None):
+        self._logger = logger or logging.getLogger(__name__)
+        self._connection_handle = connection_handle
+        self._jumper_handle = None
+        self._awaiting_my_write_response = False
+        self._notifying = False
+        self._queued_pty_packets = []
+
+    def handle_message(self, parsed_packet_with_raw_data, source):
+        parsed_packet = parsed_packet_with_raw_data.value
+        packet = parsed_packet_with_raw_data.data
 
         if is_read_by_type_response_packet(parsed_packet):
-            log.debug('read by type response')
-            jumper_handle = find_jumper_handle_in_read_by_type_response_packet(parsed_packet)
-            connection_handle = get_connection_handle_from_acl_data_packet(parsed_packet)
-            if jumper_handle is not None:
-                log.info('found jumper handle')
-                new_state = state.modify(
-                    connection_handle=connection_handle, log_handle=jumper_handle, awaiting_my_write_response=True
+            self._logger.debug('read by type response')
+            self._jumper_handle = find_jumper_handle_in_read_by_type_response_packet(parsed_packet)
+            if self._jumper_handle is not None:
+                self._connection_handle = get_connection_handle_from_acl_data_packet(parsed_packet)
+                self._logger.info(
+                    'Found jumper handle: %d on connection: %d', self._jumper_handle, self._connection_handle
                 )
+                self._awaiting_my_write_response = True
+
                 return Action(
-                    new_state=new_state,
-                    should_block_current_packet=False,
-                    packet_to_send_to_socket=
-                    gatt_protocol.create_start_notifying_on_handle_packet(connection_handle, jumper_handle),
-                    packet_to_send_to_pty=None
+                    packets_to_send_to_socket=[gatt_protocol.create_start_notifying_on_handle_packet(
+                        self._connection_handle, self._jumper_handle
+                    )],
+                    packets_to_send_to_pty=[packet]
                 )
 
-        # elif is_write_request_packet(packet) and state.awaiting_my_write_response:
-        #     new_state = state.modify(pending_write_responses=(state.pending_write_responses or []).append(packet))
-        #     return Action(new_state, True, None)
+        elif self._is_jumper_notify_message(parsed_packet):
+            self._logger.info('Got logger data: %s', repr(self._get_data_from_notify_message(parsed_packet)))
+            return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[])
 
-        elif is_write_response_packet(parsed_packet) and state.awaiting_my_write_response:
-            log.info('write response packet while awaiting')
-            new_state = state.modify(awaiting_my_write_response=False)
-            return Action(new_state, True, None, None)
+        elif self._awaiting_my_write_response:
+            if source == 'socket' and is_write_response_packet(parsed_packet):
+                self._logger.info('Received write response packet')
+                self._awaiting_my_write_response = False
+                self._notifying = True
+                self._logger.debug('Releasing queued PTY packets')
+                queued_pty_packets = list(self._queued_pty_packets)
+                self._queued_pty_packets = []
+                return Action(packets_to_send_to_socket=queued_pty_packets, packets_to_send_to_pty=[])
+            elif source == 'pty':
+                self._logger.debug('Queuing PTY packet: %s', parsed_packet)
+                self._queued_pty_packets.append(packet)
+                return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[])
 
-    return Action(state, False, None, None)
+        return get_default_action(packet, source)
+
+    def handle_pty_message(self, parsed_packet_with_raw_data):
+        parsed_packet = parsed_packet_with_raw_data.value
+        packet = parsed_packet_with_raw_data.data
+        return Action(packets_to_send_to_socket=[packet], packets_to_send_to_pty=[])
+
+    def _is_jumper_notify_message(self, parsed_packet):
+        return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
+               parsed_packet.payload.payload.cid == ATT_CID and \
+               parsed_packet.payload.payload.payload.opcode == 'ATT_OP_HANDLE_NOTIFY' and \
+               parsed_packet.payload.payload.payload.payload.handle == self._jumper_handle
+
+    @staticmethod
+    def _get_data_from_notify_message(parsed_packet):
+        return parsed_packet.payload.payload.payload.payload.data
 
 
 def is_read_bd_addr_command_complete_event_packet(parsed_packet):
@@ -167,54 +229,78 @@ def is_read_bd_addr_command_complete_event_packet(parsed_packet):
 
 
 def is_read_by_type_response_packet(parsed_packet):
-    try:
-        return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
-               parsed_packet.payload.payload.cid == ATT_CID and \
-               parsed_packet.payload.payload.payload.opcode == 'ATT_OP_READ_BY_TYPE_RESP'
-    except AttributeError:
-        log.warn('Attribute error on packet: {}'.format(parsed_packet))
-        raise
+    return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
+           parsed_packet.payload.payload.cid == ATT_CID and \
+           parsed_packet.payload.payload.payload.opcode == 'ATT_OP_READ_BY_TYPE_RESP'
 
 
 def find_jumper_handle_in_read_by_type_response_packet(parsed_packet):
     for handle_value_pair in parsed_packet.payload.payload.payload.payload.attribute_data_list:
         characteristic_declaration = gatt_protocol.parse_characteristic_declaration(handle_value_pair.value)
         try:
-            if characteristic_declaration.uuid == CHARACTARISTIC_TO_NOTIFY:
+            if characteristic_declaration.uuid == CHARACTERISTIC_TO_NOTIFY:
                 return characteristic_declaration.value_handle
         except ValueError:
             pass
     return None
 
 
+def is_acl_data_packet(parsed_packet):
+    return parsed_packet.type == 'HCI_ACLDATA_PKT'
+
+
 def get_connection_handle_from_acl_data_packet(parsed_packet):
     return parsed_packet.payload.handle
 
 
+def is_le_connection_complete_event(parsed_packet):
+    return parsed_packet.type == 'HCI_EVENT_PKT' and \
+           parsed_packet.payload.event == 'EVT_LE_META_EVENT' and \
+           parsed_packet.payload.payload.subevent == 'EVT_LE_CONN_COMPLETE'
+
+
+def get_connection_handle_from_connection_complete_event_packet(parsed_packet):
+    return parsed_packet.payload.payload.payload.handle
+
+
+def is_le_disconnection_complete_event(parsed_packet):
+    return parsed_packet.type == 'HCI_EVENT_PKT' and \
+           parsed_packet.payload.event == 'EVT_DISCONN_COMPLETE'
+
+
+def get_connection_handle_from_disconnection_complete_event_packet(parsed_packet):
+    return parsed_packet.payload.payload.handle
+
+
 def is_write_response_packet(parsed_packet):
-    try:
-        return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
-               parsed_packet.payload.payload.cid == ATT_CID and \
-               parsed_packet.payload.payload.payload.opcode == 'ATT_OP_WRITE_RESP'
-    except AttributeError:
-        print(parsed_packet)
-        raise
+    return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
+           parsed_packet.payload.payload.cid == ATT_CID and \
+           parsed_packet.payload.payload.payload.opcode == 'ATT_OP_WRITE_RESP'
 
 
 def main():
-    logging.basicConfig(level=logging.WARNING)
     parser = argparse.ArgumentParser()
     parser.add_argument('--hci', type=int, default=0, help='The number of HCI device to connect to')
     parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose')
     parser.add_argument('--log-file', type=str, default=None, help='Dumps log to file')
     args = parser.parse_args()
+
     if args.verbose == 1:
-        logging.basicConfig(level=logging.INFO)
+        logging_level = logging.INFO
     elif args.verbose > 1:
-        logging.basicConfig(level=logging.DEBUG)
+        logging_level = logging.DEBUG
+    else:
+        logging_level = logging.WARN
+
+    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging_level)
+
+    logger = logging.getLogger(__file__)
+
     if args.log_file is not None:
-        log.addHandler(logging.FileHandler(args.log_file))
-    hci_proxy = HciProxy(args.hci)
+        logger.addHandler(logging.FileHandler(args.log_file, mode='w'))
+
+    hci_proxy = HciProxy(args.hci, logger)
+
     try:
         hci_proxy.run()
     except KeyboardInterrupt:
