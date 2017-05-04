@@ -1,22 +1,18 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
-import collections
 import logging
+import collections
 import os
 import pty
 import select
 import subprocess
-from Queue import Queue
 from StringIO import StringIO
 from io import SEEK_CUR
 
-from construct import RawCopy
-from hci_protocol.hci_channel_user_socket import create_bt_socket_hci_channel_user
-from hci_protocol.hci_protocol_acldata import ATT_CID
-
 import gatt_protocol
-from hci_protocol.hci_protocol import HciPacketConstruct
+from hci_channel_user_socket import create_bt_socket_hci_channel_user
+from hci_protocol.hci_protocol import *
 
 CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
@@ -67,14 +63,18 @@ class HciProxy(object):
                     self._pty_buffer.write(data)
                     self._pty_buffer.seek(-len(data), SEEK_CUR)
 
-                    parsed_packet = RawCopy(HciPacketConstruct).parse_stream(self._pty_buffer)
+                    parsed_packet = RawCopy(HciPacket).parse_stream(self._pty_buffer)
                     packet = parsed_packet.data
                     self._logger.debug('PTY: %s', parsed_packet)
 
                 elif s is self._hci_socket:
                     source = 'socket'
                     packet = self._hci_socket.recv(4096)
-                    self._logger.debug('SOCKET: %s', RawCopy(HciPacketConstruct).parse(packet))
+                    self._logger.debug('SOCKET: %s', RawCopy(HciPacket).parse(packet))
+
+                else:
+                    self._logger.warn('Unknown readable returned by select')
+                    continue
 
                 action = self._gatt_logger.handle_message(packet, source)
                 self._logger.debug('Action: %s', action)
@@ -82,7 +82,7 @@ class HciProxy(object):
                 for packet in action.packets_to_send_to_socket:
                     self._logger.debug(
                         'Sending to socket: %s',
-                        RawCopy(HciPacketConstruct).parse(packet)
+                        RawCopy(HciPacket).parse(packet)
                     )
                     self._hci_socket.sendall(packet)
 
@@ -91,7 +91,7 @@ class HciProxy(object):
                 for packet in action.packets_to_send_to_pty:
                     self._logger.debug(
                         'Sending to PTY: %s',
-                        RawCopy(HciPacketConstruct).parse(packet)
+                        RawCopy(HciPacket).parse(packet)
                     )
                     os.write(self._pty_master, packet)
 
@@ -115,7 +115,7 @@ class GattLogger(object):
 
     def parse_hci_packet(self, packet):
         try:
-            return RawCopy(HciPacketConstruct).parse(packet)
+            return RawCopy(HciPacket).parse(packet)
         except:
             self._logger.error('Exception during packet parsing')
             return None
@@ -186,7 +186,7 @@ class GattPeripheralLogger(object):
                 )
 
         elif self._is_jumper_notify_message(parsed_packet):
-            self._logger.info('Got logger data: %s', repr(self._get_data_from_notify_message(parsed_packet)))
+            self._logger.info('Received data from logger: %s', repr(get_data_from_notify_message(parsed_packet)))
             return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[])
 
         elif self._awaiting_my_write_response:
@@ -205,33 +205,11 @@ class GattPeripheralLogger(object):
 
         return get_default_action(packet, source)
 
-    def handle_pty_message(self, parsed_packet_with_raw_data):
-        parsed_packet = parsed_packet_with_raw_data.value
-        packet = parsed_packet_with_raw_data.data
-        return Action(packets_to_send_to_socket=[packet], packets_to_send_to_pty=[])
-
     def _is_jumper_notify_message(self, parsed_packet):
-        return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
+        return parsed_packet.type == 'ACL_DATA_PACKET' and \
                parsed_packet.payload.payload.cid == ATT_CID and \
                parsed_packet.payload.payload.payload.opcode == 'ATT_OP_HANDLE_NOTIFY' and \
                parsed_packet.payload.payload.payload.payload.handle == self._jumper_handle
-
-    @staticmethod
-    def _get_data_from_notify_message(parsed_packet):
-        return parsed_packet.payload.payload.payload.payload.data
-
-
-def is_read_bd_addr_command_complete_event_packet(parsed_packet):
-    return parsed_packet.type == 'HCI_EVENT_PKT' and \
-        parsed_packet.payload.event == 'EVT_CMD_COMPLETE' and \
-        parsed_packet.payload.payload.ogf == 'INFORMATIONAL_PARAMETERS' and \
-        parsed_packet.payload.payload.ocf == 'READ_BD_ADDR_CMD'
-
-
-def is_read_by_type_response_packet(parsed_packet):
-    return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
-           parsed_packet.payload.payload.cid == ATT_CID and \
-           parsed_packet.payload.payload.payload.opcode == 'ATT_OP_READ_BY_TYPE_RESP'
 
 
 def find_jumper_handle_in_read_by_type_response_packet(parsed_packet):
@@ -245,8 +223,25 @@ def find_jumper_handle_in_read_by_type_response_packet(parsed_packet):
     return None
 
 
+def get_data_from_notify_message(parsed_packet):
+    return parsed_packet.payload.payload.payload.payload.data
+
+
+def is_read_bd_address_command_complete_event_packet(parsed_packet):
+    return parsed_packet.type == 'EVENT_PACKET' and \
+        parsed_packet.payload.event == 'COMMAND_COMPLETE' and \
+        parsed_packet.payload.payload.ogf == 'INFORMATIONAL_PARAMETERS' and \
+        parsed_packet.payload.payload.ocf == 'READ_BD_ADDRESS_COMMAND'
+
+
+def is_read_by_type_response_packet(parsed_packet):
+    return parsed_packet.type == 'ACL_DATA_PACKET' and \
+           parsed_packet.payload.payload.cid == ATT_CID and \
+           parsed_packet.payload.payload.payload.opcode == 'ATT_OP_READ_BY_TYPE_RESPONSE'
+
+
 def is_acl_data_packet(parsed_packet):
-    return parsed_packet.type == 'HCI_ACLDATA_PKT'
+    return parsed_packet.type == 'ACL_DATA_PACKET'
 
 
 def get_connection_handle_from_acl_data_packet(parsed_packet):
@@ -254,9 +249,9 @@ def get_connection_handle_from_acl_data_packet(parsed_packet):
 
 
 def is_le_connection_complete_event(parsed_packet):
-    return parsed_packet.type == 'HCI_EVENT_PKT' and \
-           parsed_packet.payload.event == 'EVT_LE_META_EVENT' and \
-           parsed_packet.payload.payload.subevent == 'EVT_LE_CONN_COMPLETE'
+    return parsed_packet.type == 'EVENT_PACKET' and \
+           parsed_packet.payload.event == 'LE_META_EVENT' and \
+           parsed_packet.payload.payload.subevent == 'LE_CONNECTION_COMPLETED'
 
 
 def get_connection_handle_from_connection_complete_event_packet(parsed_packet):
@@ -264,8 +259,8 @@ def get_connection_handle_from_connection_complete_event_packet(parsed_packet):
 
 
 def is_le_disconnection_complete_event(parsed_packet):
-    return parsed_packet.type == 'HCI_EVENT_PKT' and \
-           parsed_packet.payload.event == 'EVT_DISCONN_COMPLETE'
+    return parsed_packet.type == 'EVENT_PACKET' and \
+           parsed_packet.payload.event == 'DISCONNECTION_COMPLETED'
 
 
 def get_connection_handle_from_disconnection_complete_event_packet(parsed_packet):
@@ -273,9 +268,9 @@ def get_connection_handle_from_disconnection_complete_event_packet(parsed_packet
 
 
 def is_write_response_packet(parsed_packet):
-    return parsed_packet.type == 'HCI_ACLDATA_PKT' and \
+    return parsed_packet.type == 'ACL_DATA_PACKET' and \
            parsed_packet.payload.payload.cid == ATT_CID and \
-           parsed_packet.payload.payload.payload.opcode == 'ATT_OP_WRITE_RESP'
+           parsed_packet.payload.payload.payload.opcode == 'ATT_OP_WRITE_RESPONSE'
 
 
 def main():
@@ -305,6 +300,7 @@ def main():
         hci_proxy.run()
     except KeyboardInterrupt:
         pass
+
 
 if __name__ == '__main__':
     main()
