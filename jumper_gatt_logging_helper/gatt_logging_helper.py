@@ -9,6 +9,10 @@ import select
 import subprocess
 from StringIO import StringIO
 from io import SEEK_CUR
+import json
+import errno
+
+import struct
 
 import gatt_protocol
 from hci_channel_user_socket import create_bt_socket_hci_channel_user
@@ -16,12 +20,44 @@ from hci_protocol.hci_protocol import *
 
 CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
-# log.setLevel(logging.DEBUG)
+DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent'
+
+
+class AgentEventsSender(object):
+    def __init__(self, filename=DEFAULT_INPUT_FILENAME, logger=None):
+        self._logger = logger or logging.getLogger(__name__)
+        self._filename = filename
+        self._fifo = self.open_fifo_readwrite(self._filename)
+
+    @staticmethod
+    def open_fifo_readwrite(filename):
+        try:
+            os.mkfifo(filename)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+
+        fd = os.open(filename, os.O_RDWR | os.O_NONBLOCK)
+        return os.fdopen(fd, 'wb')
+
+    def send_event(self, data):
+        # log.debug(":".join("{:02x}".format(ord(c)) for c in data))
+        # log.debug("Git data {}, {}".format(data, len(data)))
+        version, event, timestamp, data_length = struct.unpack("<LLLL", data)
+        # log.debug("Events {}, time {}".format(event, timestamp))
+
+        log.debug('Sending event to agent. event: %d; timestamp: %d', event, timestamp)
+        event = json.dumps(dict(event=event, timestamp=timestamp)).encode() + b'\n'
+        self._fifo.write(event)
+        self._fifo.flush()
+        log.info('Event sent to agent: %s', repr(event))
 
 
 class HciProxy(object):
     def __init__(self, hci_device_number=0, logger=None):
         self._logger = logger or logging.getLogger(__name__)
+
+        self._agent_events_sender = AgentEventsSender(logger=self._logger)
 
         self._hci_device_number = hci_device_number
         try:
@@ -46,6 +82,7 @@ class HciProxy(object):
 
         self._pty_buffer = StringIO()
         self._gatt_logger = GattLogger(self._logger)
+
 
     @property
     def hci_device_name(self):
@@ -95,17 +132,20 @@ class HciProxy(object):
                     )
                     os.write(self._pty_master, packet)
 
+                if action.data_to_send_to_agent is not None:
+                    self._agent_events_sender.send_event(action.data_to_send_to_agent)
+
 
 Action = collections.namedtuple(
-    'Action', 'packets_to_send_to_socket packets_to_send_to_pty'
+    'Action', 'packets_to_send_to_socket packets_to_send_to_pty data_to_send_to_agent'
 )
 
 
 def get_default_action(packet, source):
     if source == 'socket':
-        return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[packet])
+        return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[packet], data_to_send_to_agent=None)
     elif source == 'pty':
-        return Action(packets_to_send_to_socket=[packet], packets_to_send_to_pty=[])
+        return Action(packets_to_send_to_socket=[packet], packets_to_send_to_pty=[], data_to_send_to_agent=None)
 
 
 class GattLogger(object):
@@ -182,12 +222,14 @@ class GattPeripheralLogger(object):
                     packets_to_send_to_socket=[gatt_protocol.create_start_notifying_on_handle_packet(
                         self._connection_handle, self._jumper_handle
                     )],
-                    packets_to_send_to_pty=[packet]
+                    packets_to_send_to_pty=[packet],
+                    data_to_send_to_agent=None
                 )
 
         elif self._is_jumper_notify_message(parsed_packet):
-            self._logger.info('Received data from logger: %s', repr(get_data_from_notify_message(parsed_packet)))
-            return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[])
+            data = get_data_from_notify_message(parsed_packet)
+            self._logger.info('Received data from logger: %s', repr(data))
+            return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data)
 
         elif self._awaiting_my_write_response:
             if source == 'socket' and is_write_response_packet(parsed_packet):
@@ -197,11 +239,13 @@ class GattPeripheralLogger(object):
                 self._logger.debug('Releasing queued PTY packets')
                 queued_pty_packets = list(self._queued_pty_packets)
                 self._queued_pty_packets = []
-                return Action(packets_to_send_to_socket=queued_pty_packets, packets_to_send_to_pty=[])
+                return Action(
+                    packets_to_send_to_socket=queued_pty_packets, packets_to_send_to_pty=[], data_to_send_to_agent=None
+                )
             elif source == 'pty':
                 self._logger.debug('Queuing PTY packet: %s', parsed_packet)
                 self._queued_pty_packets.append(packet)
-                return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[])
+                return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=None)
 
         return get_default_action(packet, source)
 
