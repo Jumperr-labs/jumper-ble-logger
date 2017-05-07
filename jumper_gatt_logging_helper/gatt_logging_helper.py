@@ -22,6 +22,8 @@ CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
 DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent'
 
+DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload')
+
 
 class AgentEventsSender(object):
     def __init__(self, filename=DEFAULT_INPUT_FILENAME, logger=None):
@@ -40,14 +42,11 @@ class AgentEventsSender(object):
         fd = os.open(filename, os.O_RDWR | os.O_NONBLOCK)
         return os.fdopen(fd, 'wb')
 
-    def send_event(self, data):
-        # log.debug(":".join("{:02x}".format(ord(c)) for c in data))
-        # log.debug("Git data {}, {}".format(data, len(data)))
-        version, event, timestamp, data_length = struct.unpack("<LLLL", data)
-        # log.debug("Events {}, time {}".format(event, timestamp))
+    def send_data(self, data):
+        version, event, timestamp, data_length = struct.unpack("<LLLL", data.payload)
 
         log.debug('Sending event to agent. event: %d; timestamp: %d', event, timestamp)
-        event = json.dumps(dict(event=event, timestamp=timestamp)).encode() + b'\n'
+        event = json.dumps(dict(mac_address=data.mac_address, event=event, timestamp=timestamp)).encode() + b'\n'
         self._fifo.write(event)
         self._fifo.flush()
         log.info('Event sent to agent: %s', repr(event))
@@ -133,7 +132,7 @@ class HciProxy(object):
                     os.write(self._pty_master, packet)
 
                 if action.data_to_send_to_agent is not None:
-                    self._agent_events_sender.send_event(action.data_to_send_to_agent)
+                    self._agent_events_sender.send_data(action.data_to_send_to_agent)
 
 
 Action = collections.namedtuple(
@@ -179,9 +178,10 @@ This packet will be ignored by the logger',
                     )
 
             elif is_le_connection_complete_event(parsed_packet):
-                connection_handle = get_connection_handle_from_connection_complete_event_packet(parsed_packet)
-                self._logger.info('Connected to device. Connection handle: %d', connection_handle)
-                self._peripherals_loggers[connection_handle] = GattPeripheralLogger(connection_handle, self._logger)
+                mac_address, connection_handle = get_meta_data_from_connection_complete_event_packet(parsed_packet)
+                self._logger.info('Connected to device. MAC: %s Connection handle: %d', mac_address, connection_handle)
+                self._peripherals_loggers[connection_handle] = \
+                    GattPeripheralLogger(mac_address, connection_handle, self._logger)
 
             elif is_le_disconnection_complete_event(parsed_packet):
                 connection_handle = get_connection_handle_from_disconnection_complete_event_packet(parsed_packet)
@@ -196,8 +196,9 @@ This packet will be ignored by the logger',
 
 
 class GattPeripheralLogger(object):
-    def __init__(self, connection_handle, logger=None):
+    def __init__(self, mac_address, connection_handle, logger=None):
         self._logger = logger or logging.getLogger(__name__)
+        self._mac_address = mac_address
         self._connection_handle = connection_handle
         self._jumper_handle = None
         self._awaiting_my_write_response = False
@@ -227,7 +228,7 @@ class GattPeripheralLogger(object):
                 )
 
         elif self._is_jumper_notify_message(parsed_packet):
-            data = get_data_from_notify_message(parsed_packet)
+            data = DataToSendToAgent(mac_address=self._mac_address, payload=get_data_from_notify_message(parsed_packet))
             self._logger.info('Received data from logger: %s', repr(data))
             return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data)
 
@@ -298,8 +299,8 @@ def is_le_connection_complete_event(parsed_packet):
            parsed_packet.payload.payload.subevent == 'LE_CONNECTION_COMPLETED'
 
 
-def get_connection_handle_from_connection_complete_event_packet(parsed_packet):
-    return parsed_packet.payload.payload.payload.handle
+def get_meta_data_from_connection_complete_event_packet(parsed_packet):
+    return parsed_packet.payload.payload.payload.peer_bdaddr, parsed_packet.payload.payload.payload.handle
 
 
 def is_le_disconnection_complete_event(parsed_packet):
