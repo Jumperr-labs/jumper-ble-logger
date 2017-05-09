@@ -92,7 +92,8 @@ AttReadByTypeResponse = "read_by_type_response" / Struct(
 )
 
 AttReadByGroupResponse = "read_by_group_response" / Struct(
-
+    "length" / Int8ul,
+    "attribute_data_list" / AttributeHandleValuePair[(this._._.length - 2) / this.length]
 )
 
 HandleValueNotification = "handle_value_notification" / Struct(
@@ -113,26 +114,26 @@ AttCommandPacket = "att_command_packet" / Struct(
                     ATT_OP_READ_BY_TYPE_REQUEST=0x08,
                     ATT_OP_READ_BY_TYPE_RESPONSE=0x09,
                     ATT_OP_READ_REQUEST=0x0A,
-                    ATT_OP_READ_RESPPONSE=0x0B,
+                    ATT_OP_READ_RESPONSE=0x0B,
                     ATT_OP_READ_BLOB_REQUEST=0x0C,
-                    ATT_OP_READ_BLOB_RESPPONSE=0x0D,
+                    ATT_OP_READ_BLOB_RESPONSE=0x0D,
                     ATT_OP_READ_MULTIPLE_REQUEST=0x0E,
-                    ATT_OP_READ_MULTIPLE_RESPPONSE=0x0F,
+                    ATT_OP_READ_MULTIPLE_RESPONSE=0x0F,
                     ATT_OP_READ_BY_GROUP_REQUEST=0x010,
-                    ATT_OP_READ_BY_GROUP_RESPPONSE=0x11,
+                    ATT_OP_READ_BY_GROUP_RESPONSE=0x11,
                     ATT_OP_HANDLE_NOTIFY=0x1B,
                     ATT_OP_WRITE_REQUEST=0x12,
-                    ATT_OP_WRITE_RESPPONSE=0x13,
+                    ATT_OP_WRITE_RESPONSE=0x13,
                     default=Pass
                     ),
     "payload" / Switch(this.opcode, {
         "ATT_OP_MTU_REQUEST": AttMtuRequestPacket,
         "ATT_OP_MTU_RESPONSE": AttMtuResponsePacket,
         "ATT_OP_READ_BY_TYPE_RESPONSE": AttReadByTypeResponse,
-        "ATT_OP_READ_BY_GROUP_RESPPONSE": AttReadByGroupResponse,
+        "ATT_OP_READ_BY_GROUP_RESPONSE": AttReadByGroupResponse,
         "ATT_OP_HANDLE_NOTIFY": HandleValueNotification,
         "ATT_OP_WRITE_REQUEST": AttWriteRequest,
-        "ATT_OP_WRITE_RESPPONSE": Pass
+        "ATT_OP_WRITE_RESPONSE": Pass
     }, default=Array(this._.length - 1, Byte))
 )
 
@@ -215,16 +216,91 @@ LeMetaEvent = "hci_le_meta_event" / Struct(
                        )
 )
 
-
-NumberOfCompletedPpacketsEvent = "hci_num_comp_packets_event" / Struct(
-    "num_handles" / Int8ul,
-    "results" / Array(this.num_handles, Struct(
-        "handle" / Int16ul,
-        "packets" / Int16ul
-    )),
+ErrorCode = Enum(
+    Int8ul,
+    SUCCESS=0x00,
+    UNKNOWN_HCI_COMMAND=0x01,
+    UNKNOWN_CONNECTION_IDENTIFIER=0x02,
+    HARDWARE_FAILURE=0x03,
+    PAGE_TIMEOUT=0x04,
+    AUTHENTICATION_FAILURE=0x05,
+    PIN_OR_KEY_MISSING=0x06,
+    MEMORY_CAPACITY_EXCEEDED=0x07,
+    CONNECTION_TIMEOUT=0x08,
+    CONNECTION_LIMIT_EXCEEDED=0x09,
+    SYNCHRONOUS_CONNECTION_LIMIT_TO_A_DEVICE_EXCEEDED=0x0A,
+    CONNECTION_ALREADY_EXISTS=0x0B,
+    COMMAND_DISALLOWED=0x0C,
+    CONNECTION_REJECTED_DUE_TO_LIMITED_RESOURCES=0x0D,
+    CONNECTION_REJECTED_DUE_TO_SECURITY_REASONS=0x0E,
+    CONNECTION_REJECTED_DUE_TO_UNACCEPTABLE_BD_ADDR=0x0F,
+    CONNECTION_ACCEPT_TIMEOUT_EXCEEDED=0x10,
+    UNSUPPORTED_FEATURE_OR_PARAMETER_VALUE=0x11,
+    INVALID_HCI_COMMAND_PARAMETERS=0x12,
+    REMOTE_USER_TERMINATED_CONNECTION=0x13,
+    REMOTE_DEVICE_TERMINATED_CONNECTION_DUE_TO_LOW_RESOURCES=0x14,
+    REMOTE_DEVICE_TERMINATED_CONNECTION_DUE_TO_POWER_OFF=0x15,
+    CONNECTION_TERMINATED_BY_LOCAL_HOST=0x16,
+    REPEATED_ATTEMPTS=0x17,
+    PAIRING_NOT_ALLOWED=0x18,
+    UNKNOWN_LMP_PDU=0x19,
+    UNSUPPORTED_REMOTE_OR_LMP_FEATURE=0x1A,
+    SCO_OFFSET_REJECTED=0x1B,
+    SCO_INTERVAL_REJECTED=0x1C,
+    SCO_AIR_MODE_REJECTED=0x1D,
+    INVALID_LMP_OR_LL_PARAMETERS=0x1E,
+    UNSPECIFIED_ERROR=0x1F,
+    UNSUPPORTED_LMP_OR_LL_PARAMETER_VALUE=0x20,
+    ROLE_CHANGE_NOT_ALLOWED=0x21,
+    LMP_OR_LL_RESPONSE_TIMEOUT=0x22,
+    LMP_ERROR_TRANSACTION_COLLISION_OR_LL_PROCEDURE_COLLISION=0x23,
+    LMP_PDU_NOT_ALLOWED=0x24,
+    ENCRYPTION_MODE_NOT_ACCEPTABLE=0x25,
+    LINK_KEY_CANNOT_BE_CHANGED=0x26,
+    REQUESTED_QOS_NOT_SUPPORTED=0x27,
+    INSTANT_PASSED=0x28,
+    PAIRING_WITH_UNIT_KEY_NOT_SUPPORTED=0x29,
+    DIFFERENT_TRANSACTION_COLLISION=0x2A,
+    RESERVED_FOR_FUTURE_USE=0x2B,
+    QOS_UNACCEPTABLE_PARAMETER=0x2C,
+    QOS_REJECTED=0x2D,
+    CHANNEL_CLASSIFICATION_NOT_SUPPORTED=0x2E,
+    INSUFFICIENT_SECURITY=0x2F,
+    PARAMETER_OUT_OF_MANDATORY_RANGE=0x30,
+    ROLE_SWITCH_PENDING=0x32,
+    RESERVED_SLOT_VIOLATION=0x34,
+    ROLE_SWITCH_FAILED=0x35,
+    EXTENDED_INQUIRY_RESPONSE_TOO_LARGE=0x36,
+    SECURE_SIMPLE_PAIRING_NOT_SUPPORTED_BY_HOST=0x37,
+    HOST_BUSY_PAIRING=0x38,
+    CONNECTION_REJECTED_DUE_TO_NO_SUITABLE_CHANNEL_FOUND=0x39,
+    CONTROLLER_BUSY=0x3A,
+    UNACCEPTABLE_CONNECTION_PARAMETERS=0x3B,
+    ADVERTISING_TIMEOUT=0x3C,
+    CONNECTION_TERMINATED_DUE_TO_MIC_FAILURE=0x3D,
+    CONNECTION_FAILED_TO_BE_ESTABLISHED=0x3E,
+    MAC_CONNECTION_FAILED=0x3F,
+    COARSE_CLOCK_ADJUSTMENT_REJECTED_BUT_WILL_TRY_TO_ADJUST_USING_CLOCK_DRAGGING=0x40,
+    TYPE0_SUBMAP_NOT_DEFINED=0x41,
+    UNKNOWN_ADVERTISING_IDENTIFIER=0x42,
+    LIMIT_REACHED=0x43,
+    OPERATION_CANCELLED_BY_HOST=0x44,
+    default=Pass
 )
 
-HciEventPacketConstruct = "hci_event_packet" / Struct(
+CommandStatusEvent = "hci_command_status_event" / Struct(
+    "status" / ErrorCode,
+    "num_hci_command_packets" / Int8ul,
+    "command_opcode" / Int16ul
+)
+
+NumberOfCompletedPacketsEvent = "hci_number_of_completed_packets_event" / Struct(
+    "number_of_handles" / Rebuild(Int8ul, len_(this.connection_handles)),
+    "connection_handles" / Array(this.number_of_handles, Int16ul),
+    "number_of_completed_packets" / Array(this.number_of_handles, Int16ul)
+)
+
+HciEventPacket = "hci_event_packet" / Struct(
     "event" / Enum(Int8ul,
                    DISCONNECTION_COMPLETE=0x05,
                    COMMAND_COMPLETE=0x0E,
@@ -233,12 +309,13 @@ HciEventPacketConstruct = "hci_event_packet" / Struct(
                    LE_META_EVENT=0x3E,
                    default=Pass
                    ),
-    "length" / Rebuild(Int8ul, lambda x: CommandCompletedEvent.sizeof(x.payload)),
+    "length" / Rebuild(Int8ul, lambda x: NumberOfCompletedPacketsEvent.sizeof(x.payload)),
     "payload" / Switch(this.event,
                        {
                            "DISCONNECTION_COMPLETE": DisconnectEvent,
                            "COMMAND_COMPLETE": CommandCompletedEvent,
-                           "NUMBER_OF_COMPLETED_PACKETS": NumberOfCompletedPpacketsEvent,
+                           "COMMAND_STATUS": CommandStatusEvent,
+                           "NUMBER_OF_COMPLETED_PACKETS": NumberOfCompletedPacketsEvent,
                            "LE_META_EVENT": LeMetaEvent
                        }, default=Array(this.length, Byte),
                        ),
@@ -277,7 +354,7 @@ HciPacket = "hci_packet" / Struct(
                        {
                            "COMMAND_PACKET": HciCommandPacket,
                            "ACL_DATA_PACKET": AclDataPacket,
-                           "EVENT_PACKET": HciEventPacketConstruct,
+                           "EVENT_PACKET": HciEventPacket,
                            "SYNCHRONOUS_DATA_PACKET": HciSynchronousDataPacket
                        }, default=Pass
                        ),
