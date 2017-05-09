@@ -18,6 +18,8 @@ import gatt_protocol
 from hci_channel_user_socket import create_bt_socket_hci_channel_user
 from hci_protocol.hci_protocol import *
 
+from jumper_gatt_logging_helper.event_parser_middleware import EventParser
+
 CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
 DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent'
@@ -43,19 +45,18 @@ class AgentEventsSender(object):
         return os.fdopen(fd, 'wb')
 
     def send_data(self, data):
-        version, event, timestamp, data_length = struct.unpack("<LLLL", data.payload)
-
-        log.debug('Sending event to agent. event: %d; timestamp: %d', event, timestamp)
-        event = json.dumps(dict(mac_address=data.mac_address, event=event, timestamp=timestamp)).encode() + b'\n'
+        self._logger.debug('Sending event to agent. event: %d; timestamp: %d', event, timestamp)
+        event = json.dumps(data).encode() + b'\n'
         self._fifo.write(event)
         self._fifo.flush()
-        log.info('Event sent to agent: %s', repr(event))
+        self._logger.info('Event sent to agent: %s', repr(event))
 
 
 class HciProxy(object):
-    def __init__(self, hci_device_number=0, logger=None):
+    def __init__(self, hci_device_number=0, logger=None, config=None):
         self._logger = logger or logging.getLogger(__name__)
 
+        self._event_parser = EventParser(config=config)
         self._agent_events_sender = AgentEventsSender(logger=self._logger)
 
         self._hci_device_number = hci_device_number
@@ -132,7 +133,8 @@ class HciProxy(object):
                     os.write(self._pty_master, packet)
 
                 if action.data_to_send_to_agent is not None:
-                    self._agent_events_sender.send_data(action.data_to_send_to_agent)
+                    parsed_data = self._event_parser.parse(action.data_to_send_to_agent)
+                    self._agent_events_sender.send_data(parsed_data)
 
 
 Action = collections.namedtuple(
@@ -320,6 +322,7 @@ def is_write_response_packet(parsed_packet):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('config-file', type=str, default=None, help='Events config json file')
     parser.add_argument('--hci', type=int, default=0, help='The number of HCI device to connect to')
     parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose')
     parser.add_argument('--log-file', type=str, default=None, help='Dumps log to file')
@@ -339,7 +342,18 @@ def main():
     if args.log_file is not None:
         logger.addHandler(logging.FileHandler(args.log_file, mode='w'))
 
-    hci_proxy = HciProxy(args.hci, logger)
+    if not os.path.isfile(args.config_file):
+        print('Config file is missing: {}'.format(args.config_file))
+        return 1
+
+    with open(args.config_file) as fd:
+        try:
+            config = json.load(fd)
+        except ValueError:
+            print('Config file must be in JSON format: {}'.format(args.config_file))
+            return 2
+
+    hci_proxy = HciProxy(args.hci, logger, config)
 
     try:
         hci_proxy.run()
