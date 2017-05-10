@@ -11,6 +11,7 @@ from StringIO import StringIO
 from io import SEEK_CUR
 import json
 import errno
+import time
 
 import struct
 
@@ -18,11 +19,12 @@ import gatt_protocol
 from hci_channel_user_socket import create_bt_socket_hci_channel_user
 from hci_protocol.hci_protocol import *
 
-from event_parser_middleware import EventParser
+from event_parser_middleware import EventParser, EventParserException
 
-CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
+JUMPER_DATA_CHARACTERISTIC_UUID = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
+JUMPER_TIME_CHARACTERISTIC_UUID = int('8ff456790a294a73ab8db16ce0f1a2df', 16)
 
-DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent'
+DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent/events'
 
 DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload')
 
@@ -108,11 +110,15 @@ class HciProxy(object):
             os.write(self._pty_master, packet)
 
         if action.data_to_send_to_agent is not None:
-            parsed_data = self._event_parser.parse(
-                action.data_to_send_to_agent.mac_address,
-                action.data_to_send_to_agent.payload
-            )
-            self._agent_events_sender.send_data(parsed_data)
+            try:
+                parsed_data = self._event_parser.parse(
+                    action.data_to_send_to_agent.mac_address,
+                    action.data_to_send_to_agent.payload
+                )
+            except EventParserException as e:
+                self._logger.warn('Error parsing packet from BLE device: %s', e)
+            else:
+                self._agent_events_sender.send_data(parsed_data)
 
     def run(self):
         while True:
@@ -212,7 +218,7 @@ This packet will be ignored by the logger',
             elif is_command_status_packet(parsed_packet):
                 block_packet = False
                 for peripheral_logger in self._peripherals_loggers:
-                    if peripheral_logger.awaiting_my_write_response:
+                    if peripheral_logger.awaiting_response:
                         block_packet = True
                         break
                 if block_packet:
@@ -245,11 +251,13 @@ class GattPeripheralLogger(object):
         self._logger = logger or logging.getLogger(__name__)
         self._mac_address = mac_address
         self._connection_handle = connection_handle
-        self._jumper_handle = None
-        self.awaiting_my_write_response = False
-        self._notifying = False
+        self._jumper_data_handle = None
+        self._jumper_time_handle = None
+        self.awaiting_response = False
         self._queued_pty_packets = []
         self._number_of_hidden_data_packets_to_socket = 0
+        self._state = 'INIT'
+        self._time_offset = None
 
     def reset_number_of_hidden_data_packets_to_sockets(self):
         result = self._number_of_hidden_data_packets_to_socket
@@ -260,39 +268,59 @@ class GattPeripheralLogger(object):
         parsed_packet = parsed_packet_with_raw_data.value
         packet = parsed_packet_with_raw_data.data
 
-        if is_read_by_type_response_packet(parsed_packet):
-            self._logger.debug('read by type response')
-            self._jumper_handle = find_jumper_handle_in_read_by_type_response_packet(parsed_packet)
-            if self._jumper_handle is not None:
-                self._connection_handle = get_connection_handle_from_acl_data_packet(parsed_packet)
-                self._logger.info(
-                    'Found jumper handle: %d on connection: %d', self._jumper_handle, self._connection_handle
-                )
-                self.awaiting_my_write_response = True
+        if self._state == 'INIT':
+            if is_read_by_type_response_packet(parsed_packet):
+                self._logger.debug('read by type response')
 
+                self._jumper_data_handle = \
+                    self._jumper_data_handle or \
+                    find_handle_in_read_by_type_response_packet(parsed_packet, JUMPER_DATA_CHARACTERISTIC_UUID)
+                self._jumper_time_handle = \
+                    self._jumper_time_handle or \
+                    find_handle_in_read_by_type_response_packet(parsed_packet, JUMPER_TIME_CHARACTERISTIC_UUID)
+
+                if self._jumper_data_handle and self._jumper_time_handle:
+                    self._state = 'TIME_SYNC'
+                    self._logger.debug('State = %s', self._state)
+                    self._number_of_hidden_data_packets_to_socket = self._number_of_hidden_data_packets_to_socket + 1
+                    self.awaiting_response = True
+                    return Action(
+                        packets_to_send_to_socket=[gatt_protocol.create_read_request_packet(
+                            self._connection_handle, self._jumper_time_handle
+                        )],
+                        packets_to_send_to_pty=[packet],
+                        data_to_send_to_agent=None
+                    )
+
+        elif self._state == 'TIME_SYNC':
+            if source == 'socket' and is_read_response_packet(parsed_packet):
+                self._time_offset = - get_value_from_read_response_packet(parsed_packet) + time.time()
+
+                self._state = 'STARTING_NOTIFICATIONS'
+                self._logger.debug('State = %s', self._state)
                 self._number_of_hidden_data_packets_to_socket = self._number_of_hidden_data_packets_to_socket + 1
-
+                self.awaiting_response = True
                 return Action(
                     packets_to_send_to_socket=[gatt_protocol.create_start_notifying_on_handle_packet(
-                        self._connection_handle, self._jumper_handle
+                        self._connection_handle, self._jumper_data_handle
                     )],
-                    packets_to_send_to_pty=[packet],
+                    packets_to_send_to_pty=[],
                     data_to_send_to_agent=None
                 )
+            elif source == 'pty':
+                self._logger.debug('Queuing PTY packet: %s', parsed_packet)
+                self._queued_pty_packets.append(packet)
+                return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=None)
 
-        elif self._is_jumper_notify_message(parsed_packet):
-            data = DataToSendToAgent(mac_address=self._mac_address, payload=get_data_from_notify_message(parsed_packet))
-            self._logger.info('Received data from logger: %s', repr(data))
-            return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data)
-
-        elif self.awaiting_my_write_response:
+        elif self._state == 'STARTING_NOTIFICATIONS':
             if source == 'socket' and is_write_response_packet(parsed_packet):
                 self._logger.info('Received write response packet')
-                self.awaiting_my_write_response = False
-                self._notifying = True
                 self._logger.debug('Releasing queued PTY packets')
                 queued_pty_packets = list(self._queued_pty_packets)
+                self.awaiting_response = False
                 self._queued_pty_packets = []
+                self._state = 'RUNNING'
+                self._logger.debug('State = %s', self._state)
                 return Action(
                     packets_to_send_to_socket=queued_pty_packets, packets_to_send_to_pty=[], data_to_send_to_agent=None
                 )
@@ -301,20 +329,26 @@ class GattPeripheralLogger(object):
                 self._queued_pty_packets.append(packet)
                 return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=None)
 
+        elif self._state == 'RUNNING':
+            if self._is_jumper_notify_message(parsed_packet):
+                data = DataToSendToAgent(mac_address=self._mac_address, payload=get_data_from_notify_message(parsed_packet))
+                self._logger.info('Received data from logger: %s', repr(data))
+                return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data)
+
         return get_default_action(packet, source)
 
     def _is_jumper_notify_message(self, parsed_packet):
         return parsed_packet.type == 'ACL_DATA_PACKET' and \
                parsed_packet.payload.payload.cid == ATT_CID and \
                parsed_packet.payload.payload.payload.opcode == 'ATT_OP_HANDLE_NOTIFY' and \
-               parsed_packet.payload.payload.payload.payload.handle == self._jumper_handle
+               parsed_packet.payload.payload.payload.payload.handle == self._jumper_data_handle
 
 
-def find_jumper_handle_in_read_by_type_response_packet(parsed_packet):
+def find_handle_in_read_by_type_response_packet(parsed_packet, characteristics_uuid):
     for handle_value_pair in parsed_packet.payload.payload.payload.payload.attribute_data_list:
         characteristic_declaration = gatt_protocol.parse_characteristic_declaration(handle_value_pair.value)
         try:
-            if characteristic_declaration.uuid == CHARACTERISTIC_TO_NOTIFY:
+            if characteristic_declaration.uuid == characteristics_uuid:
                 return characteristic_declaration.value_handle
         except ValueError:
             pass
@@ -323,6 +357,10 @@ def find_jumper_handle_in_read_by_type_response_packet(parsed_packet):
 
 def get_data_from_notify_message(parsed_packet):
     return parsed_packet.payload.payload.payload.payload.data
+
+
+def get_value_from_read_response_packet(parsed_packet):
+    return parsed_packet.payload.payload.payload.payload.value
 
 
 def is_read_bd_address_command_complete_event_packet(parsed_packet):
@@ -336,6 +374,12 @@ def is_read_by_type_response_packet(parsed_packet):
     return parsed_packet.type == 'ACL_DATA_PACKET' and \
            parsed_packet.payload.payload.cid == ATT_CID and \
            parsed_packet.payload.payload.payload.opcode == 'ATT_OP_READ_BY_TYPE_RESPONSE'
+
+
+def is_read_response_packet(parsed_packet):
+    return parsed_packet.type == 'ACL_DATA_PACKET' and \
+           parsed_packet.payload.payload.cid == ATT_CID and \
+           parsed_packet.payload.payload.payload.opcode == 'ATT_OP_READ_RESPONSE'
 
 
 def is_acl_data_packet(parsed_packet):

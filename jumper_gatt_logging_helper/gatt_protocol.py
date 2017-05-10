@@ -43,3 +43,25 @@ def create_write_request_packet(connection_handle, handle, data, num_bytes_for_d
             )
         )
     )
+
+
+def create_read_request_packet(connection_handle, handle):
+    return HciPacket.build(
+        dict(
+            type='ACL_DATA_PACKET',
+            payload=dict(
+                flags=0,
+                handle=connection_handle,
+                payload=dict(
+                    length=3,
+                    cid=ATT_CID,
+                    payload=dict(
+                        opcode='ATT_OP_READ_REQUEST',
+                        payload=dict(
+                            handle=handle
+                        )
+                    )
+                )
+            )
+        )
+    )
