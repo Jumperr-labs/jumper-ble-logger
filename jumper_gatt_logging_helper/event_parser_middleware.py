@@ -1,21 +1,5 @@
 import struct
 
-"""
-{
-    1: {
-        "type":"RadioEvent",
-        "data": [
-            "is_on": "B", //also possible to write "Byte" and convert to B ? 
-            "channel: "B"
-        ]
-    },
-    5: {
-    ...
-    }
-
-}
-"""
-
 
 class EventParserException(Exception):
     pass
@@ -28,9 +12,9 @@ class EventParser(object):
     def __init__(self, config):
         self.events_dict = config
 
-    def parse(self, data):
+    def parse(self, mac_address, data):
         if len(data) < self.LOGGER_EVENT_HEADER_LENGTH:
-            raise EventParserException('Data header too short')
+            raise EventParserException('Data header too short: {}'.format(repr(data)))
 
         header = data[:self.LOGGER_EVENT_HEADER_LENGTH]
         body = data[self.LOGGER_EVENT_HEADER_LENGTH:]
@@ -45,7 +29,8 @@ class EventParser(object):
 
         event_dict = dict(
             type=event_config['type'],
-            timestamp=timestamp
+            timestamp=timestamp,
+            mac_address=mac_address
         )
 
         if event_config['data']:

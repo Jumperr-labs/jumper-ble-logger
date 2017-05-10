@@ -18,7 +18,7 @@ import gatt_protocol
 from hci_channel_user_socket import create_bt_socket_hci_channel_user
 from hci_protocol.hci_protocol import *
 
-from jumper_gatt_logging_helper.event_parser_middleware import EventParser
+from event_parser_middleware import EventParser
 
 CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
@@ -45,8 +45,8 @@ class AgentEventsSender(object):
         return os.fdopen(fd, 'wb')
 
     def send_data(self, data):
-        self._logger.debug('Sending event to agent. event: %d; timestamp: %d', event, timestamp)
         event = json.dumps(data).encode() + b'\n'
+        self._logger.debug('Sending event to agent')
         self._fifo.write(event)
         self._fifo.flush()
         self._logger.info('Event sent to agent: %s', repr(event))
@@ -80,61 +80,66 @@ class HciProxy(object):
 
         self._inputs = [self._pty_fd, self._hci_socket]
 
-        self._pty_buffer = StringIO()
+        self._pty_buffer = StringIO()  # Used as a seekable stream
         self._gatt_logger = GattLogger(self._logger)
-
 
     @property
     def hci_device_name(self):
         return 'hci{}'.format(self._hci_device_number)
 
+    def handle_packet(self, packet, source):
+        action = self._gatt_logger.handle_message(packet, source)
+        self._logger.debug('Action: %s', action)
+
+        for packet in action.packets_to_send_to_socket:
+            self._logger.debug(
+                'Sending to socket: %s',
+                RawCopy(HciPacket).parse(packet)
+            )
+            self._hci_socket.sendall(packet)
+
+        if source == 'socket' and len(action.packets_to_send_to_pty) == 0:
+            self._logger.debug('Skipping PTY')
+        for packet in action.packets_to_send_to_pty:
+            self._logger.debug(
+                'Sending to PTY: %s',
+                RawCopy(HciPacket).parse(packet)
+            )
+            os.write(self._pty_master, packet)
+
+        if action.data_to_send_to_agent is not None:
+            parsed_data = self._event_parser.parse(
+                action.data_to_send_to_agent.mac_address,
+                action.data_to_send_to_agent.payload
+            )
+            self._agent_events_sender.send_data(parsed_data)
+
     def run(self):
         while True:
             readable, _, _ = select.select(self._inputs, [], [])
-            for s in readable:
-                if s is self._pty_fd:
-                    source = 'pty'
-                    data = os.read(self._pty_master, 4096)
-                    self._logger.debug('Raw PTY data: %s', repr(data))
 
-                    self._pty_buffer.write(data)
-                    self._pty_buffer.seek(-len(data), SEEK_CUR)
+            if self._hci_socket in readable:
+                source = 'socket'
+                packet = self._hci_socket.recv(4096)
+                self._logger.debug('SOCKET: %s', RawCopy(HciPacket).parse(packet))
+                self.handle_packet(packet, source)
 
+            if self._pty_fd in readable:
+                data = os.read(self._pty_master, 4096)
+                self._logger.debug('Raw PTY data: %s', repr(data))
+                self._pty_buffer.write(data)
+                self._pty_buffer.seek(-len(data), SEEK_CUR)
+
+                source = 'pty'
+                while True:
+                    if self._pty_buffer.pos == self._pty_buffer.len:
+                        break
                     parsed_packet = RawCopy(HciPacket).parse_stream(self._pty_buffer)
-                    packet = parsed_packet.data
+                    if not parsed_packet:
+                        break
                     self._logger.debug('PTY: %s', parsed_packet)
-
-                elif s is self._hci_socket:
-                    source = 'socket'
-                    packet = self._hci_socket.recv(4096)
-                    self._logger.debug('SOCKET: %s', RawCopy(HciPacket).parse(packet))
-
-                else:
-                    self._logger.warn('Unknown readable returned by select')
-                    continue
-
-                action = self._gatt_logger.handle_message(packet, source)
-                self._logger.debug('Action: %s', action)
-
-                for packet in action.packets_to_send_to_socket:
-                    self._logger.debug(
-                        'Sending to socket: %s',
-                        RawCopy(HciPacket).parse(packet)
-                    )
-                    self._hci_socket.sendall(packet)
-
-                if len(action.packets_to_send_to_pty) == 0:
-                    self._logger.debug('Skipping PTY')
-                for packet in action.packets_to_send_to_pty:
-                    self._logger.debug(
-                        'Sending to PTY: %s',
-                        RawCopy(HciPacket).parse(packet)
-                    )
-                    os.write(self._pty_master, packet)
-
-                if action.data_to_send_to_agent is not None:
-                    parsed_data = self._event_parser.parse(action.data_to_send_to_agent)
-                    self._agent_events_sender.send_data(parsed_data)
+                    packet = parsed_packet.data
+                    self.handle_packet(packet, source)
 
 
 Action = collections.namedtuple(
@@ -179,6 +184,44 @@ This packet will be ignored by the logger',
                         connection_handle
                     )
 
+            elif is_num_of_completed_packets_event(parsed_packet) and source == 'socket':
+                new_connection_handles = []
+                new_number_of_completed_packets = []
+
+                for i in range(parsed_packet.payload.payload.number_of_handles):
+                    connection_handle = parsed_packet.payload.payload.connection_handles[i]
+                    if connection_handle in self._peripherals_loggers:
+                        number_of_hidden_packets = \
+                            self._peripherals_loggers[connection_handle].reset_number_of_hidden_data_packets_to_sockets()
+                        number_of_completed_packets = parsed_packet.payload.payload.number_of_completed_packets[i] - \
+                            number_of_hidden_packets
+                        if number_of_completed_packets != 0:
+                            new_connection_handles.append(connection_handle)
+                            new_number_of_completed_packets.append(number_of_completed_packets)
+                if len(new_connection_handles) > 0:
+                    new_packet = build_number_of_completed_packets_event_packet(
+                        new_connection_handles, new_number_of_completed_packets
+                    )
+
+                    return Action(
+                        packets_to_send_to_socket=[],
+                        packets_to_send_to_pty=[new_packet],
+                        data_to_send_to_agent=None
+                    )
+
+            elif is_command_status_packet(parsed_packet):
+                block_packet = False
+                for peripheral_logger in self._peripherals_loggers:
+                    if peripheral_logger.awaiting_my_write_response:
+                        block_packet = True
+                        break
+                if block_packet:
+                    return Action(
+                        packets_to_send_to_socket=[],
+                        packets_to_send_to_pty=[],
+                        data_to_send_to_agent=None
+                    )
+
             elif is_le_connection_complete_event(parsed_packet):
                 mac_address, connection_handle = get_meta_data_from_connection_complete_event_packet(parsed_packet)
                 self._logger.info('Connected to device. MAC: %s Connection handle: %d', mac_address, connection_handle)
@@ -203,9 +246,15 @@ class GattPeripheralLogger(object):
         self._mac_address = mac_address
         self._connection_handle = connection_handle
         self._jumper_handle = None
-        self._awaiting_my_write_response = False
+        self.awaiting_my_write_response = False
         self._notifying = False
         self._queued_pty_packets = []
+        self._number_of_hidden_data_packets_to_socket = 0
+
+    def reset_number_of_hidden_data_packets_to_sockets(self):
+        result = self._number_of_hidden_data_packets_to_socket
+        self._number_of_hidden_data_packets_to_socket = 0
+        return result
 
     def handle_message(self, parsed_packet_with_raw_data, source):
         parsed_packet = parsed_packet_with_raw_data.value
@@ -219,7 +268,9 @@ class GattPeripheralLogger(object):
                 self._logger.info(
                     'Found jumper handle: %d on connection: %d', self._jumper_handle, self._connection_handle
                 )
-                self._awaiting_my_write_response = True
+                self.awaiting_my_write_response = True
+
+                self._number_of_hidden_data_packets_to_socket = self._number_of_hidden_data_packets_to_socket + 1
 
                 return Action(
                     packets_to_send_to_socket=[gatt_protocol.create_start_notifying_on_handle_packet(
@@ -234,10 +285,10 @@ class GattPeripheralLogger(object):
             self._logger.info('Received data from logger: %s', repr(data))
             return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data)
 
-        elif self._awaiting_my_write_response:
+        elif self.awaiting_my_write_response:
             if source == 'socket' and is_write_response_packet(parsed_packet):
                 self._logger.info('Received write response packet')
-                self._awaiting_my_write_response = False
+                self.awaiting_my_write_response = False
                 self._notifying = True
                 self._logger.debug('Releasing queued PTY packets')
                 queued_pty_packets = list(self._queued_pty_packets)
@@ -320,9 +371,45 @@ def is_write_response_packet(parsed_packet):
            parsed_packet.payload.payload.payload.opcode == 'ATT_OP_WRITE_RESPONSE'
 
 
+def is_num_of_completed_packets_event(parsed_packet):
+    return parsed_packet.type == 'EVENT_PACKET' and parsed_packet.payload.event == 'NUMBER_OF_COMPLETED_PACKETS'
+
+
+def is_command_status_packet(parsed_packet):
+    return parsed_packet.type == 'EVENT_PACKET' and parsed_packet.payload == 'COMMAND_STATUS'
+
+
+def get_list_of_handle_and_num_of_completed_packets_pairs_from_num_of_completed_packets_event(parsed_packet):
+    result = []
+    for i in range(parsed_packet.payload.payload.number_of_handles):
+        result.append(
+            (
+                parsed_packet.payload.payload.connection_handles[i],
+                parsed_packet.payload.payload.number_of_completed_packets[i]
+            )
+        )
+    return result
+
+
+def build_number_of_completed_packets_event_packet(connection_handles, number_of_completed_packets):
+    return HciPacket.build(
+        dict(
+            type='EVENT_PACKET',
+            payload=dict(
+                event='NUMBER_OF_COMPLETED_PACKETS',
+                payload=dict(
+                    number_of_handles=len(connection_handles),
+                    connection_handles=connection_handles,
+                    number_of_completed_packets=number_of_completed_packets
+                )
+            )
+        )
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('config-file', type=str, default=None, help='Events config json file')
+    parser.add_argument('--config-file', type=str, default=None, help='Events config json file')
     parser.add_argument('--hci', type=int, default=0, help='The number of HCI device to connect to')
     parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose')
     parser.add_argument('--log-file', type=str, default=None, help='Dumps log to file')
@@ -349,6 +436,7 @@ def main():
     with open(args.config_file) as fd:
         try:
             config = json.load(fd)
+            config = {int(k): v for k, v in config.iteritems()}
         except ValueError:
             print('Config file must be in JSON format: {}'.format(args.config_file))
             return 2
