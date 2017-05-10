@@ -10,7 +10,7 @@ import logging
 import argparse
 
 from construct import RawCopy
-from hci_protocol import HciPacketConstruct
+from jumper_gatt_logging_helper.hci_protocol.hci_protocol import HciPacketConstruct
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)

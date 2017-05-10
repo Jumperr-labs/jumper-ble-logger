@@ -14,11 +14,11 @@ import errno
 
 import struct
 
-import gatt_protocol
-from hci_channel_user_socket import create_bt_socket_hci_channel_user
-from hci_protocol.hci_protocol import *
+from jumper_gatt_logging_helper import gatt_protocol
+from jumper_gatt_logging_helper.hci_channel_user_socket import create_bt_socket_hci_channel_user
+from jumper_gatt_logging_helper.hci_protocol.hci_protocol import *
 
-from event_parser_middleware import EventParser
+from jumper_gatt_logging_helper.event_parser_middleware import EventParser
 
 CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
