@@ -1,9 +1,16 @@
 from setuptools import setup, find_packages
+from setuptools.command.install import install
 from codecs import open
 from os import path
+import subprocess
 
 here = path.abspath(path.dirname(__file__))
 
+
+class InstallAgent(install):
+    def run(self):
+        subprocess.check_call(['sh', 'install_ageny.sh'])
+        install.run(self)
 # Get the long description from the README file
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
@@ -12,6 +19,7 @@ setup(
     name='jumper-gatt-logging-helper',
     version='0.0.1',
 
+    cmdclass={'install': InstallAgent},
     description='Jumper GATT proxy for logging BLE traffic',
     long_description=long_description,
 
