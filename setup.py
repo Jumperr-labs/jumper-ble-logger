@@ -9,14 +9,14 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
-    name='jumper-gatt-logging-helper',
+    name='jumper-ble-logger',
     version='0.0.1',
 
     description='Jumper GATT proxy for logging BLE traffic',
     long_description=long_description,
 
     # The project's main homepage.
-    url='https://github.com/Jumperr-labs/jumper-gatt-logging-helper',
+    url='https://github.com/Jumperr-labs/jumper-ble-logger',
 
     # Author details
     author='Jumper Team',
@@ -52,7 +52,7 @@ setup(
     # pip to create the appropriate form of executable for the target platform.
     entry_points={
         'console_scripts': [
-            'jumper-ble-logger=jumper_gatt_logging_helper.gatt_logging_helper:main',
+            'jumper-ble-logger=jumper_ble_logger.ble_logger:main',
         ],
     },
 )

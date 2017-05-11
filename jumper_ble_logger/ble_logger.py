@@ -15,11 +15,11 @@ import time
 
 import struct
 
-from jumper_gatt_logging_helper import gatt_protocol
-from jumper_gatt_logging_helper.hci_channel_user_socket import create_bt_socket_hci_channel_user
-from jumper_gatt_logging_helper.hci_protocol.hci_protocol import *
+from . import gatt_protocol
+from .hci_channel_user_socket import create_bt_socket_hci_channel_user
+from .hci_protocol.hci_protocol import *
 
-from jumper_gatt_logging_helper.event_parser_middleware import EventParser, EventParserException
+from .event_parser_middleware import EventParser, EventParserException
 
 JUMPER_DATA_CHARACTERISTIC_UUID = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 JUMPER_TIME_CHARACTERISTIC_UUID = int('8ff456790a294a73ab8db16ce0f1a2df', 16)
@@ -73,7 +73,7 @@ class HciProxy(object):
         self._pty_master, pty_slave = pty.openpty()
         self._pty_fd = os.fdopen(self._pty_master, 'rwb')
         hci_tty = os.ttyname(pty_slave)
-        self._logger.info('TTY slave for the virtual HCI: %s', hci_tty)
+        self._logger.debug('TTY slave for the virtual HCI: %s', hci_tty)
         try:
             subprocess.check_call(['hciattach', hci_tty, 'any'])
         except subprocess.CalledProcessError:
@@ -460,10 +460,10 @@ def build_number_of_completed_packets_event_packet(connection_handles, number_of
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config-file', type=str, required=True, help='Events config json file')
-    parser.add_argument('--hci', type=int, default=0, help='The number of HCI device to connect to')
-    parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose')
-    parser.add_argument('--log-file', type=str, default=None, help='Dumps log to file')
+    parser.add_argument('--config-file', '-c', type=str, required=True, help='Events config json file')
+    parser.add_argument('--hci', '-i', type=int, default=0, help='The number of HCI device to connect to')
+    parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose mode')
+    parser.add_argument('--log-file', '-l', type=str, default=None, help='Dumps log to file')
     args = parser.parse_args()
 
     if args.verbose == 1:

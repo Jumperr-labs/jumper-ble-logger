@@ -39,14 +39,14 @@ This is the process of how it works (GATT only):
 The user/gateway program is not being affected by steps 3-4 and they are being filtered out from 'hci1'
 
 ## Installation
-`sudo pip install https://github.com/Jumperr-labs/jumper-gatt-logging-helper/archive/v0.0.1.tar.gz`
+`sudo pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
 
 ## Usage
 - Make sure Jumper's Logging Agent is running
 `sudo service jumper-agent start`
 - Create a config file of a JSON format such as _"config_sample.json"_
 - Run `hciconfig` and check your current available HCI devices
-- Start the BLE Logger: `jumper_ble_logger `
+- Start the BLE Logger: `jumper-ble-logger --config-file config_sample.json`
 - Run `hciconfig` again to see your newly created HCI device
 - Connect your gateway program to the newly created HCI device. The BLE Logger will start logging as soon as you connect to a peripheral and discover its characteristics.
 
