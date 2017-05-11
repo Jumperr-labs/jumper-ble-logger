@@ -1,7 +1,7 @@
 # Jumper BLE Logger
 ## Introduction
 The BLE Logger is part of Jumper Insights. A full visibility platform for IoT systems.
-The BLE Logger logs data from a BLE peripheral and sends it to Jumper's cloud system.
+The BLE Logger is a process that runs on a Linux gateway and logs data from a BLE peripheral that is using the [Jumper uLogger](https://github.com/Jumperr-labs/jumper-ulogger) and sends it to Jumper's cloud system.
 
 ## Prerequisites
 **Gateway:**
@@ -48,7 +48,7 @@ The user/gateway program is not being affected by steps 3-4 and they are being f
 - Run `hciconfig` and check your current available HCI devices
 - Start the BLE Logger: `jumper-ble-logger --config-file config_sample.json`
 - Run `hciconfig` again to see your newly created HCI device
-- Connect your gateway program to the newly created HCI device. The BLE Logger will start logging as soon as you connect to a peripheral and discover its characteristics.
+- Start your gateway program as usual. Make sure to connect to the newly created HCI device. The BLE Logger will start logging as soon as you connect to a peripheral and discover its characteristics.
 
 ## Contact Us
 We are happy to help! Feel free to contact us about any issue and give us your feedback at [info@jumper.io](mailto:info@jumper.io)

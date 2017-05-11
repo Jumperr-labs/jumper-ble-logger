@@ -237,9 +237,9 @@ This packet will be ignored by the logger',
 
             elif is_le_disconnection_complete_event(parsed_packet):
                 connection_handle = get_connection_handle_from_disconnection_complete_event_packet(parsed_packet)
-                if connection_handle in self._peripherals_loggers:
-                    self._peripherals_loggers.pop(connection_handle)
-                else:
+                try:
+                    del self._peripherals_loggers[connection_handle]
+                except KeyError:
                     self._logger.warning(
                         'Received disconnection event for an unfamiliar connection handle: %d', connection_handle
                     )
