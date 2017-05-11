@@ -73,6 +73,54 @@ HciCommandPacket = "hci_command_packet" / Struct(
 # ============================================================================
 ATT_CID = 4
 
+AttOpcode = Enum(
+    Int8ul,
+    ATT_OP_ERROR_RESPONSE=0x01,
+    ATT_OP_MTU_REQUEST=0x02,
+    ATT_OP_MTU_RESPONSE=0x03,
+    ATT_OP_READ_BY_TYPE_REQUEST=0x08,
+    ATT_OP_READ_BY_TYPE_RESPONSE=0x09,
+    ATT_OP_READ_REQUEST=0x0A,
+    ATT_OP_READ_RESPONSE=0x0B,
+    ATT_OP_READ_BLOB_REQUEST=0x0C,
+    ATT_OP_READ_BLOB_RESPONSE=0x0D,
+    ATT_OP_READ_MULTIPLE_REQUEST=0x0E,
+    ATT_OP_READ_MULTIPLE_RESPONSE=0x0F,
+    ATT_OP_READ_BY_GROUP_REQUEST=0x010,
+    ATT_OP_READ_BY_GROUP_RESPONSE=0x11,
+    ATT_OP_HANDLE_NOTIFY=0x1B,
+    ATT_OP_WRITE_REQUEST=0x12,
+    ATT_OP_WRITE_RESPONSE=0x13,
+    default=Pass
+)
+
+AttErrorCode = Enum(
+    Int8ul,
+    Invalid_Handle=0x01,
+    Read_Not_Permitted=0x02,
+    Write_Not_Permitted=0x03,
+    Invalid_PDU=0x04,
+    Insufficient_Authentication=0x05,
+    Request_Not_Supported=0x06,
+    Invalid_Offset=0x07,
+    Insufficient_Authorization=0x08,
+    Prepare_Queue_Full=0x09,
+    Attribute_Not_Found=0x0A,
+    Attribute_Not_Long=0x0B,
+    Insufficient_Encryption_Key_Size=0x0C,
+    Invalid_Attribute_Value_Length=0x0D,
+    Unlikely_Error=0x0E,
+    Insufficient_Encryption=0x0F,
+    Unsupported_Group_Type=0x10,
+    Insufficient_Resources=0x11
+)
+
+AttOpErrorResponse = "att_error_response_packet" / Struct(
+    "request_opcode_in_error" / AttOpcode,
+    "attribute_handle_in_error" / Int16ul,
+    "error_code" / AttErrorCode
+)
+
 AttMtuRequestPacket = "att_mtu_request_packet" / Struct(
     "client_mtu" / Int16ul
 )
@@ -86,9 +134,23 @@ AttributeHandleValuePair = "attribute_handle_value_pair" / Struct(
     "value" / Bytes(this._.length - 2)
 )
 
+AttReadByTypeRequest = "read_by_type_request" / Struct(
+    "starting_handle" / Int16ul,
+    "ending_handle" / Int16ul,
+    "attribute_type" / Bytes(this._._.length - 5)
+)
+
 AttReadByTypeResponse = "read_by_type_response" / Struct(
     "length" / Int8ul,
     "attribute_data_list" / AttributeHandleValuePair[(this._._.length - 2) / this.length]
+)
+
+AttReadRequest = 'read_request' / Struct(
+    "handle" / Int16ul
+)
+
+AttReadResponse = 'read_response' / Struct(
+    "value" / BytesInteger(this._._.length - 1, swapped=True)
 )
 
 AttReadByGroupResponse = "read_by_group_response" / Struct(
@@ -107,29 +169,15 @@ AttWriteRequest = "att_write_request" / Struct(
 )
 
 AttCommandPacket = "att_command_packet" / Struct(
-    "opcode" / Enum(Int8ul,
-                    ATT_OP_ERROR_RESPONSE=0x01,
-                    ATT_OP_MTU_REQUEST=0x02,
-                    ATT_OP_MTU_RESPONSE=0x03,
-                    ATT_OP_READ_BY_TYPE_REQUEST=0x08,
-                    ATT_OP_READ_BY_TYPE_RESPONSE=0x09,
-                    ATT_OP_READ_REQUEST=0x0A,
-                    ATT_OP_READ_RESPONSE=0x0B,
-                    ATT_OP_READ_BLOB_REQUEST=0x0C,
-                    ATT_OP_READ_BLOB_RESPONSE=0x0D,
-                    ATT_OP_READ_MULTIPLE_REQUEST=0x0E,
-                    ATT_OP_READ_MULTIPLE_RESPONSE=0x0F,
-                    ATT_OP_READ_BY_GROUP_REQUEST=0x010,
-                    ATT_OP_READ_BY_GROUP_RESPONSE=0x11,
-                    ATT_OP_HANDLE_NOTIFY=0x1B,
-                    ATT_OP_WRITE_REQUEST=0x12,
-                    ATT_OP_WRITE_RESPONSE=0x13,
-                    default=Pass
-                    ),
+    "opcode" / AttOpcode,
     "payload" / Switch(this.opcode, {
+        "ATT_OP_ERROR_RESPONSE": AttOpErrorResponse,
         "ATT_OP_MTU_REQUEST": AttMtuRequestPacket,
         "ATT_OP_MTU_RESPONSE": AttMtuResponsePacket,
+        "ATT_OP_READ_BY_TYPE_REQUEST": AttReadByTypeRequest,
         "ATT_OP_READ_BY_TYPE_RESPONSE": AttReadByTypeResponse,
+        "ATT_OP_READ_REQUEST": AttReadRequest,
+        "ATT_OP_READ_RESPONSE": AttReadResponse,
         "ATT_OP_READ_BY_GROUP_RESPONSE": AttReadByGroupResponse,
         "ATT_OP_HANDLE_NOTIFY": HandleValueNotification,
         "ATT_OP_WRITE_REQUEST": AttWriteRequest,

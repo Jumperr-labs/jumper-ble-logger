@@ -10,7 +10,7 @@ import logging
 import argparse
 
 from construct import RawCopy
-from jumper_gatt_logging_helper.hci_protocol.hci_protocol import HciPacketConstruct
+from .hci_protocol import HciPacket
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
@@ -32,7 +32,7 @@ class HciSniffer(object):
             readable, _, _ = select.select([self._hci_socket], [], [])
             if readable is not None:
                 packet = self._hci_socket.recv(4096)
-                log.info('SOCKET: %s', RawCopy(HciPacketConstruct).parse(packet))
+                log.info('SOCKET: %s', RawCopy(HciPacket).parse(packet))
 
 
 def main():
