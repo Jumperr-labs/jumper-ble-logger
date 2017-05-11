@@ -39,7 +39,7 @@ This is the process of how it works (GATT only):
 The user/gateway program is not being affected by steps 3-4 and they are being filtered out from 'hci1'
 
 ## Installation
-`sudo pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
+`sudo pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.9.tar.gz`
 
 ## Usage
 - Make sure Jumper's Logging Agent is running
