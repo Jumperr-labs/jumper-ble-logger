@@ -26,7 +26,7 @@ JUMPER_TIME_CHARACTERISTIC_UUID = int('8ff456790a294a73ab8db16ce0f1a2df', 16)
 
 DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent/events'
 
-DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload')
+DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload time_offset')
 
 
 class AgentEventsSender(object):
@@ -113,7 +113,8 @@ class HciProxy(object):
             try:
                 parsed_data = self._event_parser.parse(
                     action.data_to_send_to_agent.mac_address,
-                    action.data_to_send_to_agent.payload
+                    action.data_to_send_to_agent.payload,
+                    action.data_to_send_to_agent.time_offset
                 )
             except EventParserException as e:
                 self._logger.warn('Error parsing packet from BLE device: %s', e)
@@ -331,9 +332,15 @@ class GattPeripheralLogger(object):
 
         elif self._state == 'RUNNING':
             if self._is_jumper_notify_message(parsed_packet):
-                data = DataToSendToAgent(mac_address=self._mac_address, payload=get_data_from_notify_message(parsed_packet))
-                self._logger.info('Received data from logger: %s', repr(data))
-                return Action(packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data)
+                data_to_send_to_agent = DataToSendToAgent(
+                    mac_address=self._mac_address,
+                    payload=get_data_from_notify_message(parsed_packet),
+                    time_offset=self._time_offset
+                )
+                self._logger.info('Received data from logger: %s', repr(data_to_send_to_agent))
+                return Action(
+                    packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data_to_send_to_agent
+                )
 
         return get_default_action(packet, source)
 
