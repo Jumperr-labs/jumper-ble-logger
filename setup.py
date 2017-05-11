@@ -9,7 +9,7 @@ here = path.abspath(path.dirname(__file__))
 
 class InstallAgent(install):
     def run(self):
-        subprocess.check_call(['sh', 'install_ageny.sh'])
+        subprocess.check_call(['./install_agent.sh'])
         install.run(self)
 # Get the long description from the README file
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
