@@ -8,13 +8,15 @@ The BLE Logger is a process that runs on a Linux gateway and logs data from a BL
 
 - Linux machine as a central BLE device
 - Python2.7 and Pip installed
-- Jumper's Logging Agent should be installed and running
 - LE connection to the BLE peripheral
 
 **Peripherals**
 
 - Jumper's uLogger should be installed
 - Currently, only GATT protocol is supported.
+
+## Installation
+`sudo pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
 
 ## Getting Started
 Check out our sample project for the Nordic nRF52 development kit.
@@ -37,9 +39,6 @@ This is the process of how it works (GATT only):
 5. When a logging notification is being received, the BLE Logger will write it to the Logging Agent.
 
 The user/gateway program is not being affected by steps 3-4 and they are being filtered out from 'hci1'
-
-## Installation
-`sudo pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
 
 ## Usage
 - Make sure Jumper's Logging Agent is running
