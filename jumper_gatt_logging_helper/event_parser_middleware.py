@@ -9,8 +9,9 @@ class EventParser(object):
     LOGGER_EVENT_HEADER = "<LLLL"
     LOGGER_EVENT_HEADER_LENGTH = struct.calcsize(LOGGER_EVENT_HEADER)
 
-    def __init__(self, config):
-        self.events_dict = config
+    def __init__(self, config, logger):
+        self._events_dict = config
+        self._logger = logger
 
     def parse(self, mac_address, data, time_offset):
         if len(data) < self.LOGGER_EVENT_HEADER_LENGTH:
@@ -20,10 +21,17 @@ class EventParser(object):
         body = data[self.LOGGER_EVENT_HEADER_LENGTH:]
         version, event_type_id, timestamp, data_length = struct.unpack(self.LOGGER_EVENT_HEADER, header)
 
-        event_config = self.events_dict.get(event_type_id, None)
+        event_config = self._events_dict.get(event_type_id, None)
+
+        if event_config is None:
+            self._logger.warninig('Event type missing in config for event id: %d', event_type_id)
+            type = event_type_id
+
+        else:
+            type = event_config['type']
 
         event_dict = dict(
-            type=event_config['type'],
+            type=type,
             timestamp=time_offset + timestamp,
             device_id=mac_address
         )

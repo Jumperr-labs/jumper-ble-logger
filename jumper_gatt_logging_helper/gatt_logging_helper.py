@@ -15,11 +15,11 @@ import time
 
 import struct
 
-import gatt_protocol
-from hci_channel_user_socket import create_bt_socket_hci_channel_user
-from hci_protocol.hci_protocol import *
+from jumper_gatt_logging_helper import gatt_protocol
+from jumper_gatt_logging_helper.hci_channel_user_socket import create_bt_socket_hci_channel_user
+from jumper_gatt_logging_helper.hci_protocol.hci_protocol import *
 
-from event_parser_middleware import EventParser, EventParserException
+from jumper_gatt_logging_helper.event_parser_middleware import EventParser, EventParserException
 
 JUMPER_DATA_CHARACTERISTIC_UUID = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 JUMPER_TIME_CHARACTERISTIC_UUID = int('8ff456790a294a73ab8db16ce0f1a2df', 16)
@@ -58,7 +58,7 @@ class HciProxy(object):
     def __init__(self, hci_device_number=0, logger=None, config=None):
         self._logger = logger or logging.getLogger(__name__)
 
-        self._event_parser = EventParser(config=config)
+        self._event_parser = EventParser(config=config, logger=self._logger)
         self._agent_events_sender = AgentEventsSender(logger=self._logger)
 
         self._hci_device_number = hci_device_number
@@ -117,7 +117,7 @@ class HciProxy(object):
                     action.data_to_send_to_agent.time_offset
                 )
             except EventParserException as e:
-                self._logger.warn('Error parsing packet from BLE device: %s', e)
+                self._logger.warning('Error parsing packet from BLE device: %s', e)
             else:
                 self._agent_events_sender.send_data(parsed_data)
 
@@ -185,7 +185,7 @@ class GattLogger(object):
                     peripheral_logger = self._peripherals_loggers[connection_handle]
                     return peripheral_logger.handle_message(parsed_packet_with_raw_data, source)
                 else:
-                    self._logger.warn(
+                    self._logger.warning(
                         'Received ACL data packet for an unfamiliar connection handle: %d. \
 This packet will be ignored by the logger',
                         connection_handle
@@ -240,7 +240,7 @@ This packet will be ignored by the logger',
                 if connection_handle in self._peripherals_loggers:
                     self._peripherals_loggers.pop(connection_handle)
                 else:
-                    self._logger.warn(
+                    self._logger.warning(
                         'Received disconnection event for an unfamiliar connection handle: %d', connection_handle
                     )
 
@@ -460,7 +460,7 @@ def build_number_of_completed_packets_event_packet(connection_handles, number_of
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config-file', type=str, default=None, help='Events config json file')
+    parser.add_argument('--config-file', type=str, required=True, help='Events config json file')
     parser.add_argument('--hci', type=int, default=0, help='The number of HCI device to connect to')
     parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose')
     parser.add_argument('--log-file', type=str, default=None, help='Dumps log to file')
