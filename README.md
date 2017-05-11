@@ -1,6 +1,6 @@
 # Jumper BLE Logger
 ## Introduction
-The BLE Logger is part of Jumper Insight. A full visibility platform for IoT systems.
+The BLE Logger is part of Jumper Insights. A full visibility platform for IoT systems.
 The BLE Logger logs data from a BLE peripheral and sends it to Jumper's cloud system.
 
 ## Prerequisites
@@ -13,6 +13,8 @@ The BLE Logger logs data from a BLE peripheral and sends it to Jumper's cloud sy
     - Currently, only GATT protocol is supported.
 
 ## How it Works
+*If you just want to get started, feel free to skip this step*
+
 When the BLE Logger is started, it will connect to your current HCI device (usually "hci0") and will create a new 
 proxied HCI device (usually "hci1") which you will set your gateway program to connect to.
 
@@ -23,14 +25,19 @@ and will not pass them on to "hci1" (gateway program).
 This is the process of how it works (GATT only):
 1. The BLE Logger recognizes established LE connections.
 2. When the gateway program is discovering characteristics, the BLE Logger recognizes Jumper's GATT service.
-3. The BLE Logger writes to the notifications handle to enable logging notifications.
-4. When a logging notification is being received, the BLE logger will write it to the Logging Agent.
+3. The BLE Logger reads the current timestamp from the device and synchronizes it with the real world time.
+4. The BLE Logger writes to the notifications handle to enable logging notifications.
+5. When a logging notification is being received, the BLE Logger will write it to the Logging Agent.
 
 The user/gateway program is not being affected by steps 3-4 and they are being filtered out from 'hci1'
 
 ## Installation
-`pip install BLABLABLA`
+`wget BLALBLBLALABA`
+`pip install .`
 
 ## Usage
 - Make sure Jumper's Logging Agent is running
-- Run the following command: `python -m BLABLBABLBALBALBALB`
+`sudo service jumper-agent start`
+- Run `hciconfig` and check your current available HCI devices
+- Start the BLE Logger: `jumper_ble_logger `
+- Connect 

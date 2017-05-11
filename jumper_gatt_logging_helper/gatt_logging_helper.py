@@ -22,7 +22,7 @@ from jumper_gatt_logging_helper.event_parser_middleware import EventParser
 
 CHARACTERISTIC_TO_NOTIFY = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 
-DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent'
+DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent/events'
 
 DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload')
 
@@ -409,7 +409,7 @@ def build_number_of_completed_packets_event_packet(connection_handles, number_of
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config-file', type=str, default=None, help='Events config json file')
+    parser.add_argument('--config-file', type=str, required=True, help='Events config json file')
     parser.add_argument('--hci', type=int, default=0, help='The number of HCI device to connect to')
     parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose')
     parser.add_argument('--log-file', type=str, default=None, help='Dumps log to file')

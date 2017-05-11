@@ -52,7 +52,7 @@ setup(
     # pip to create the appropriate form of executable for the target platform.
     entry_points={
         'console_scripts': [
-            'hci_proxy=jumper_gatt_logging_helper.gatt_logging_helper:main',
+            'jumper-ble-logger=jumper_gatt_logging_helper.gatt_logging_helper:main',
         ],
     },
 )
