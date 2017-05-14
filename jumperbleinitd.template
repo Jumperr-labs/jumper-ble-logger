@@ -11,7 +11,7 @@
 # Author: Roy Razon <roy@jumper.io>
 
 dir="/opt/jumper_ble_logger"
-cmd="jumper_ble_logger --config-file /opt/jumper_logging_agent/events_config.json"
+cmd="jumper-ble-logger --config-file /opt/jumper_ble_logger/events_config.json"
 user="jumperble"
 
 name=`basename $0`
@@ -34,11 +34,7 @@ case "$1" in
     else
         echo "Starting $name"
         cd "$dir"
-        if [ -z "$user" ]; then
-            sudo $cmd >> "$stdout_log" 2>> "$stderr_log" &
-        else
-            sudo -u "$user" $cmd >> "$stdout_log" 2>> "$stderr_log" &
-        fi
+        sudo $cmd >> "$stdout_log" 2>> "$stderr_log" &
         echo $! > "$pid_file"
         if ! is_running; then
             echo "Unable to start, see $stdout_log and $stderr_log"
