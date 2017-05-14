@@ -19,7 +19,7 @@ The BLE Logger is a process that runs on a Linux gateway and logs data from a BL
 `sudo pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
 
 ## Getting Started
-Check out our sample project for the Nordic nRF52 development kit.
+Check out our [sample project for the Nordic nRF52 development kit](https://github.com/Jumperr-labs/jumper-ulogger/tree/master/samples/nrf52-ble-sample-project).
 
 ## How it Works
 *If you just want to get started, feel free to skip this step*
