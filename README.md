@@ -1,12 +1,11 @@
 # Jumper BLE Logger
 ## Introduction
-The BLE Logger is part of Jumper Insights. A full visibility platform for IoT systems.
-The BLE Logger is a process that runs on a Linux gateway and logs data from a BLE peripheral that is using the [Jumper uLogger](https://github.com/Jumperr-labs/jumper-ulogger) and sends it to Jumper's cloud system.
+The BLE Logger is part of Jumper Insights- a full visibility platform for IoT systems. The BLE Logger is a process that runs on Linux gateways and logs data from a BLE device that is connected to the gateway via BLE and is using the [Jumper uLogger](https://github.com/Jumperr-labs/jumper-ulogger).
 
 ## Prerequisites
 **Gateway:**
 
-- Linux machine as a central BLE device
+- Linux based device as a central BLE device
 - Python2.7 and Pip installed
 - LE connection to the BLE peripheral
 
@@ -20,6 +19,15 @@ The BLE Logger is a process that runs on a Linux gateway and logs data from a BL
 
 ## Getting Started
 Check out our [sample project for the Nordic nRF52 development kit](https://github.com/Jumperr-labs/jumper-ulogger/tree/master/samples/nrf52-ble-sample-project).
+
+## Usage
+- Make sure Jumper's Logging Agent is running
+`sudo service jumper-agent start`
+- Create a config file of a JSON format such as _"config_sample.json"_
+- Run `hciconfig` and check your current available HCI devices
+- Start the BLE Logger: `jumper-ble-logger --config-file config_sample.json`
+- Run `hciconfig` again to see your newly created HCI device
+- Start your gateway program as usual. Make sure to connect to the newly created HCI device. The BLE Logger will start logging as soon as you connect to a peripheral and discover its characteristics.
 
 ## How it Works
 *If you just want to get started, feel free to skip this step*
@@ -39,15 +47,6 @@ This is the process of how it works (GATT only):
 5. When a logging notification is being received, the BLE Logger will write it to the Logging Agent.
 
 The user/gateway program is not being affected by steps 3-4 and they are being filtered out from 'hci1'
-
-## Usage
-- Make sure Jumper's Logging Agent is running
-`sudo service jumper-agent start`
-- Create a config file of a JSON format such as _"config_sample.json"_
-- Run `hciconfig` and check your current available HCI devices
-- Start the BLE Logger: `jumper-ble-logger --config-file config_sample.json`
-- Run `hciconfig` again to see your newly created HCI device
-- Start your gateway program as usual. Make sure to connect to the newly created HCI device. The BLE Logger will start logging as soon as you connect to a peripheral and discover its characteristics.
 
 ## Contact Us
 We are happy to help! Feel free to contact us about any issue and give us your feedback at [info@jumper.io](mailto:info@jumper.io)
