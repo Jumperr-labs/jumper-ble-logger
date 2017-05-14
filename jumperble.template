@@ -1,0 +1,12 @@
+[Unit]
+Description=Jumper Agent Service
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+StartLimitInterval=200
+StartLimitBurst=5

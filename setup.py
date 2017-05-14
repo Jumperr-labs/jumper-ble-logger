@@ -11,6 +11,7 @@ class InstallAgent(install):
     def run(self):
         subprocess.check_call(['./install_agent.sh'])
         install.run(self)
+        subprocess.check_call(['./setup_service.sh'])
 # Get the long description from the README file
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
