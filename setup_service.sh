@@ -40,7 +40,7 @@ chown ${SERVICE_USER}:${SERVICE_USER} ${FIFO_DIR}
 
 echo Copying files...
 # Copying the agent to its final destination
-COPY_FILES="config_sample.json"
+COPY_FILES="events_config.json"
 for FILE in ${COPY_FILES}; do
     cp -R ${SCRIPT_DIR}/${FILE} ${DEST_DIR}/
 done
@@ -73,7 +73,7 @@ else
     SERVICE_FILE=/lib/systemd/${SERVICE_NAME}.service
 
     cp ${SCRIPT_DIR}/jumperble.template ${SERVICE_FILE}
-    echo "ExecStart=jumper-ble-logger --config-file ${DEST_DIR}/config_sample.json" >> ${SERVICE_FILE}
+    echo "ExecStart=jumper-ble-logger --config-file ${DEST_DIR}/events_config.json" >> ${SERVICE_FILE}
     echo "User=${SERVICE_USER}" >> ${SERVICE_FILE}
     ln -fs ${SERVICE_FILE} /etc/systemd/system/${SERVICE_NAME}.service
 

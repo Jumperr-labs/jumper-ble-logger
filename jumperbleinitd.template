@@ -11,7 +11,7 @@
 # Author: Roy Razon <roy@jumper.io>
 
 dir="/opt/jumper_ble_logger"
-cmd="jumper_ble_logger --config-file /opt/jumper_logging_agent/config_sample.json"
+cmd="jumper_ble_logger --config-file /opt/jumper_logging_agent/events_config.json"
 user="jumperble"
 
 name=`basename $0`
