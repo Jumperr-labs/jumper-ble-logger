@@ -13,10 +13,10 @@ The BLE Logger is a process that runs on a Linux gateway and logs data from a BL
 **Peripherals**
 
 - Jumper's uLogger should be installed
-- Currently, only GATT protocol is supported.
+- BLE - Currently, only GATT protocol is supported.
 
 ## Installation
-`sudo pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
+`sudo -H pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
 
 ## Getting Started
 Check out our [sample project for the Nordic nRF52 development kit](https://github.com/Jumperr-labs/jumper-ulogger/tree/master/samples/nrf52-ble-sample-project).
@@ -43,11 +43,18 @@ The user/gateway program is not being affected by steps 3-4 and they are being f
 ## Usage
 - Make sure Jumper's Logging Agent is running
 `sudo service jumper-agent start`
-- Create a config file of a JSON format such as _"config_sample.json"_
+- Modify _"/etc/jumper_ble_logger/events_config.json"_ to create new types of events if needed
 - Run `hciconfig` and check your current available HCI devices
-- Start the BLE Logger: `jumper-ble-logger --config-file config_sample.json`
+- Start the BLE Logger: `sudo service jumper-ble start`
 - Run `hciconfig` again to see your newly created HCI device
 - Start your gateway program as usual. Make sure to connect to the newly created HCI device. The BLE Logger will start logging as soon as you connect to a peripheral and discover its characteristics.
+
+## Troubleshooting
+Check out the following files for logs:
+- /var/log/jumper-ble.err
+- /var/log/jumper-ble.log
+- /var/log/jumper-agent.err
+- /var/log/jumper-agent.log
 
 ## Contact Us
 We are happy to help! Feel free to contact us about any issue and give us your feedback at [info@jumper.io](mailto:info@jumper.io)

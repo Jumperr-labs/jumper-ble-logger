@@ -21,7 +21,7 @@ fi
 
 INSTALLATION_LOG=/tmp/jumper_ble_logger_installation.log
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-DEST_DIR=/opt/jumper_ble_logger
+DEST_DIR=/etc/jumper_ble_logger
 FIFO_DIR=/var/run/jumper_ble_logger
 SERVICE_USER=jumperble
 SERVICE_NAME=jumper-ble

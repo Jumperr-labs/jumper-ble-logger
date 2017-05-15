@@ -10,8 +10,8 @@
 ### END INIT INFO
 # Author: Roy Razon <roy@jumper.io>
 
-dir="/opt/jumper_ble_logger"
-cmd="jumper-ble-logger --config-file /opt/jumper_ble_logger/events_config.json"
+dir="/etc/jumper_ble_logger"
+cmd="jumper-ble-logger --config-file /etc/jumper_ble_logger/events_config.json"
 user="jumperble"
 
 name=`basename $0`
