@@ -73,7 +73,7 @@ else
     SERVICE_FILE=/lib/systemd/${SERVICE_NAME}.service
 
     cp ${SCRIPT_DIR}/jumperble.template ${SERVICE_FILE}
-    echo "ExecStart=/usr/local/bin/jumper-ble-logger --config-file ${DEST_DIR}/events_config.json" >> ${SERVICE_FILE}
+    echo "ExecStart=sudo /usr/local/bin/jumper-ble-logger --config-file ${DEST_DIR}/events_config.json" >> ${SERVICE_FILE}
     echo "User=${SERVICE_USER}" >> ${SERVICE_FILE}
     ln -fs ${SERVICE_FILE} /etc/systemd/system/${SERVICE_NAME}.service
 
