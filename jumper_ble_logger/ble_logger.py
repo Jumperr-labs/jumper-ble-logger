@@ -12,7 +12,6 @@ from io import SEEK_CUR
 import json
 import errno
 import time
-
 import struct
 
 from . import gatt_protocol
@@ -458,6 +457,10 @@ def build_number_of_completed_packets_event_packet(connection_handles, number_of
     )
 
 
+def change_dictionary_keys_from_str_to_int(d):
+    return {int(k): v for k, v in d.items()}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config-file', '-c', type=str, required=True, help='Events config json file')
@@ -486,8 +489,8 @@ def main():
 
     with open(args.config_file) as fd:
         try:
-            config = json.load(fd)
-            config = {int(k): v for k, v in config.iteritems()}
+            config = change_dictionary_keys_from_str_to_int(json.load(fd))
+
         except ValueError:
             print('Config file must be in JSON format: {}'.format(args.config_file))
             return 2
