@@ -9,7 +9,7 @@ class EventParserException(Exception):
 
 
 class EventParser(object):
-    LOGGER_EVENT_HEADER = "<LLLL"
+    LOGGER_EVENT_HEADER = "<BBIB"
     LOGGER_EVENT_HEADER_LENGTH = struct.calcsize(LOGGER_EVENT_HEADER)
 
     def __init__(self, config, logger=None):
