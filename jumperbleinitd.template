@@ -11,7 +11,7 @@
 # Author: Roy Razon <roy@jumper.io>
 
 dir="/etc/jumper_ble_logger"
-cmd="jumper-ble-logger --config-file /etc/jumper_ble_logger/events_config.json"
+cmd="jumper-ble-logger --config-file /etc/jumper_ble_logger/events_config.json -v"
 user="jumperble"
 
 name=`basename $0`
