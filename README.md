@@ -15,7 +15,7 @@ The BLE Logger is part of Jumper Insights- a full visibility platform for IoT sy
 - BLE - Currently, only GATT protocol is supported.
 
 ## Installation
-`sudo -H pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.1.tar.gz`
+`sudo -H pip install https://github.com/Jumperr-labs/jumper-ble-logger/archive/v0.0.15.tar.gz`
 
 ## Getting Started
 Check out our [sample project for the Nordic nRF52 development kit](https://github.com/Jumperr-labs/jumper-ulogger/tree/master/samples/nrf52-ble-sample-project).
