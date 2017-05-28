@@ -15,7 +15,7 @@ DEFAULT_MAC = 'AA:BB:CC:DD:EE:FF'
 
 def create_packet(timestamp=None, version=1, event_type=2, data_length=1, data=b'\x01'):
     timestamp = timestamp or round(time.time())
-    return struct.pack('<LLLL{}s'.format(data_length), version, event_type, timestamp, data_length, data)
+    return struct.pack('<BBIB{}s'.format(data_length), version, event_type, timestamp, data_length, data)
 
 
 def dict_from_config_file(config_file):

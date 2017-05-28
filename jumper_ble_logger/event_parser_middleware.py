@@ -72,7 +72,9 @@ class EventParser(object):
         d = dict()
         strings = [x for x in body.split('\x00') if x != '']
         if len(strings) != len(event_config):
-            raise EventParserException('Not enough strings in packet body')
+            raise EventParserException(
+                'Not enough strings in packet body.\nBody: {}\nStrings: {}'.format(repr(body), strings)
+            )
 
         for i in range(len(strings)):
             string_name = event_config[i]
