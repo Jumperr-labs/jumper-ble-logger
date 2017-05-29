@@ -13,6 +13,8 @@ import json
 import errno
 import time
 import struct
+from datetime import datetime
+import pytz
 
 from . import gatt_protocol
 from .hci_channel_user_socket import create_bt_socket_hci_channel_user
@@ -294,7 +296,7 @@ class GattPeripheralLogger(object):
 
         elif self._state == 'TIME_SYNC':
             if source == 'socket' and is_read_response_packet(parsed_packet):
-                self._time_offset = - get_value_from_read_response_packet(parsed_packet) + time.time()
+		self._time_offset = - get_value_from_read_response_packet(parsed_packet) + datetime.now(pytz.utc)
 
                 self._state = 'STARTING_NOTIFICATIONS'
                 self._logger.debug('State = %s', self._state)
