@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import struct
 import logging
-
+from datetime import timedelta
 
 class EventParserException(Exception):
     pass
@@ -44,9 +44,11 @@ class EventParser(object):
 
         event_dict = dict(
             type=type,
-            timestamp=time_offset + timestamp,
+            timestamp=time_offset + timedelta(seconds=timestamp),
             device_id=mac_address
         )
+
+	print(time_offset + timedelta(seconds=timestamp))
 
         if event_config:
             if event_config.get('data'):
