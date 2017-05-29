@@ -4,6 +4,7 @@ import struct
 import logging
 from datetime import timedelta
 
+
 class EventParserException(Exception):
     pass
 
@@ -31,7 +32,7 @@ class EventParser(object):
 
         header = data[:self.LOGGER_EVENT_HEADER_LENGTH]
         body = data[self.LOGGER_EVENT_HEADER_LENGTH:]
-        version, event_type_id, timestamp, data_length = struct.unpack(self.LOGGER_EVENT_HEADER, header)
+        version, event_type_id, time_from_boot, data_length = struct.unpack(self.LOGGER_EVENT_HEADER, header)
 
         event_config = self._events_dict.get(event_type_id, None)
 
@@ -42,13 +43,14 @@ class EventParser(object):
         else:
             type = event_config['type']
 
+        timestamp = time_offset + timedelta(seconds=time_from_boot)
         event_dict = dict(
             type=type,
-            timestamp=time_offset + timedelta(seconds=timestamp),
+            timestamp=timestamp.isoformat() + 'Z',
             device_id=mac_address
         )
 
-	print(time_offset + timedelta(seconds=timestamp))
+        print(time_offset + timedelta(seconds=time_from_boot))
 
         if event_config:
             if event_config.get('data'):
