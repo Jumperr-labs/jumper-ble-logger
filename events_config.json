@@ -1,7 +1,7 @@
 {
   "0": {
     "type": "boot",
-    "strings": ["fw_version"]
+    "strings": ["firmware_version"]
   },
   "1": {
     "type":"radio_state",
