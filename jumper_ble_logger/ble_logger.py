@@ -1,6 +1,7 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
+import atexit
 import logging
 import collections
 import os
@@ -11,10 +12,12 @@ from StringIO import StringIO
 from io import SEEK_CUR
 import json
 import errno
-import time
-import struct
 from datetime import datetime, timedelta
-import pytz
+import threading
+
+import signal
+from jumper_logging_agent.agent import \
+    Agent, DEFAULT_FLUSH_PRIORITY, DEFAULT_FLUSH_INTERVAL, DEFAULT_FLUSH_THRESHOLD, DEFAULT_EVENT_TYPE
 
 from . import gatt_protocol
 from .hci_channel_user_socket import create_bt_socket_hci_channel_user
@@ -25,7 +28,7 @@ from .event_parser_middleware import EventParser, EventParserException
 JUMPER_DATA_CHARACTERISTIC_UUID = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 JUMPER_TIME_CHARACTERISTIC_UUID = int('8ff456790a294a73ab8db16ce0f1a2df', 16)
 
-DEFAULT_INPUT_FILENAME = '/var/run/jumper_logging_agent/events'
+DEFAULT_INPUT_FILENAME = '/var/run/jumper_ble_logger/events'
 
 DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload time_offset')
 
@@ -466,10 +469,37 @@ def change_dictionary_keys_from_str_to_int(d):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config-file', '-c', type=str, required=True, help='Events config json file')
+    parser.add_argument(
+        '--flush-threshold', help='Number of events buffered until flushing', type=int, default=DEFAULT_FLUSH_THRESHOLD
+    )
+    parser.add_argument(
+        '--flush-priority', help='Event priority (integer) upon which to flush pending events', type=int,
+        default=DEFAULT_FLUSH_PRIORITY
+    )
+    parser.add_argument(
+        '--flush-interval', help='Interval in seconds after which pending events will be flushed', type=float,
+        default=DEFAULT_FLUSH_INTERVAL
+    )
+    parser.add_argument(
+        '--default-event-type', help='Default event type if not specified in the event itself', type=str,
+        default=DEFAULT_EVENT_TYPE
+    )
+    parser.add_argument(
+        '--events-config-file',
+        type=str,
+        help='Path of the events config file in JSON format.',
+        default = '/etc/jumper_ble_logger/events_config.json'
+    )
+    parser.add_argument(
+        '--config-file',
+        type=str,
+        help='Path of the config file in JSON format.',
+        default='/etc/jumper_ble_logger/config.json'
+    )
     parser.add_argument('--hci', '-i', type=int, default=0, help='The number of HCI device to connect to')
     parser.add_argument('--verbose', '-v', action='count', help='Verbosity, call this flag twice for ultra verbose mode')
     parser.add_argument('--log-file', '-l', type=str, default=None, help='Dumps log to file')
+    parser.add_argument('-d', '--dev-mode', help='Sends data to development BE', action='store_true')
     args = parser.parse_args()
 
     if args.verbose == 1:
@@ -479,32 +509,88 @@ def main():
     else:
         logging_level = logging.WARN
 
-    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging_level)
+    logging.basicConfig(format='%(asctime)s %(levelname)8s %(name)10s: %(message)s', level=logging_level)
 
     logger = logging.getLogger(__file__)
 
     if args.log_file is not None:
         logger.addHandler(logging.FileHandler(args.log_file, mode='w'))
 
+
     if not os.path.isfile(args.config_file):
         print('Config file is missing: {}'.format(args.config_file))
-        return 1
+        return 3
 
     with open(args.config_file) as fd:
         try:
-            config = change_dictionary_keys_from_str_to_int(json.load(fd))
-
+            config = json.load(fd)
         except ValueError:
             print('Config file must be in JSON format: {}'.format(args.config_file))
+            return 4
+    try:
+        project_id = config['project_id']
+        write_key = config['write_key']
+    except KeyError as e:
+        print('Missing entry in config file: {}. {}'.format(args.config_file, e))
+        return 5
+
+    if not os.path.isfile(args.events_config_file):
+        print('Config file is missing: {}'.format(args.events_config_file))
+        return 1
+
+    with open(args.events_config_file) as fd:
+        try:
+            events_config = change_dictionary_keys_from_str_to_int(json.load(fd))
+
+        except ValueError:
+            print('Config file must be in JSON format: {}'.format(args.events_config_file))
             return 2
 
-    hci_proxy = HciProxy(args.hci, logger, config)
+    print('Starting agent')
+
+    agent_started_event = threading.Event()
+
+    def on_listening():
+        print('Agent listening on named pipe %s' % (agent.input_filename,))
+        agent_started_event.set()
+
+    agent = Agent(
+        input_filename=DEFAULT_INPUT_FILENAME,
+        project_id=project_id,
+        write_key=write_key,
+        flush_priority=args.flush_priority,
+        flush_threshold=args.flush_threshold,
+        flush_interval=args.flush_interval,
+        default_event_type=args.default_event_type,
+        event_store=None,
+        on_listening=on_listening,
+        dev_mode=args.dev_mode
+    )
+
+    # signal.signal(signal.SIGTERM, lambda *a: agent.stop())
+    # signal.signal(signal.SIGINT, lambda *a: agent.stop())
+
+    atexit.register(agent.cleanup)
+
+    logging_agent_thread = threading.Thread(target=agent.start)
+    logging_agent_thread.start()
+
+    agent_started_event.wait()
+
+    hci_proxy = HciProxy(args.hci, logger, events_config)
 
     try:
         hci_proxy.run()
     except KeyboardInterrupt:
         pass
 
+    agent.stop()
+    logging_agent_thread.join()
+    agent.cleanup()
+    print('Exiting')
+    return 0
+
 
 if __name__ == '__main__':
-    main()
+    x = main()
+    exit(x)

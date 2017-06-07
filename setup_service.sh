@@ -34,9 +34,13 @@ else
 fi
 
 echo Creating directories...
-rm -rf ${DEST_DIR}
-mkdir -p ${DEST_DIR}
-mkdir -p ${FIFO_DIR}
+#rm -rf ${DEST_DIR}
+if [!-d ${DEST_DIR}]; then
+    mkdir -p ${DEST_DIR}
+fi;
+if [!-d ${FIFO_DIR}]; then
+    mkdir -p ${FIFO_DIR}
+fi;
 chown ${SERVICE_USER}:${SERVICE_USER} ${FIFO_DIR}
 
 echo Copying files...
@@ -74,7 +78,7 @@ else
     SERVICE_FILE=/lib/systemd/${SERVICE_NAME}.service
 
     cp ${SCRIPT_DIR}/jumperble.template ${SERVICE_FILE}
-    echo "ExecStart=/usr/local/bin/jumper-ble-logger -v --config-file ${DEST_DIR}/events_config.json" >> ${SERVICE_FILE}
+    echo "ExecStart=/usr/local/bin/jumper-ble-logger -v" >> ${SERVICE_FILE}
     echo "User=root" >> ${SERVICE_FILE}
     ln -fs ${SERVICE_FILE} /etc/systemd/system/${SERVICE_NAME}.service
 
