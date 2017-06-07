@@ -12,7 +12,7 @@ here = path.abspath(path.dirname(__file__))
 class InstallAgent(install):
     def run(self):
         install.run(self)
-        subprocess.check_call(['bash', './setup_service.sh'], shell=True)
+        subprocess.check_call(['bash', './setup_service.sh'], stdout=subprocess.STDOUT)
 # Get the long description from the README file
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
