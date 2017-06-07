@@ -4,6 +4,8 @@ from codecs import open
 from os import path
 import subprocess
 
+from jumper_ble_logger import version
+
 here = path.abspath(path.dirname(__file__))
 
 
@@ -17,7 +19,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name='jumper-ble-logger',
-    version='0.0.1',
+    version=version,
 
     cmdclass={'install': InstallAgent},
     description='Jumper GATT proxy for logging BLE traffic',
@@ -25,9 +27,14 @@ setup(
 
     # The project's main homepage.
     url='https://github.com/Jumperr-labs/jumper-ble-logger',
+    download_url='https://github.com/Jumperr-labs/jumper-ble-logger/archive/{}.tar.gz'.format(version),
 
     # Author details
     author='Jumper Team',
+    author_email='info@jumper.io',
+
+    keywords=['ble', 'bluetooth', 'nrf52', 'gatt', 'logging', 'jumper'],
+    license='Apache 2.0',
 
     classifiers=[
         # How mature is this project? Common values are
@@ -53,7 +60,7 @@ setup(
 
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().
-    packages=find_packages(),
+    packages=find_packages(exclude=['tests']),
     install_requires=['construct', 'jumper-logging-agent'],
     # To provide executable scripts, use entry points in preference to the
     # "scripts" keyword. Entry points provide cross-platform support and allow
