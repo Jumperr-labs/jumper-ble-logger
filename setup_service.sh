@@ -25,6 +25,8 @@ DEST_DIR=/etc/jumper_ble_logger
 FIFO_DIR=/var/run/jumper_ble_logger
 SERVICE_USER=jumperble
 SERVICE_NAME=jumper-ble
+CONFIG_DIR=/etc/jumper_logging_agent
+CONFIG_FILE=config.json
 
 if id -u ${SERVICE_USER} >/dev/null 2>&1; then
     echo Reusing user ${SERVICE_USER}
@@ -41,6 +43,12 @@ fi;
 if [!-d ${FIFO_DIR}]; then
     mkdir -p ${FIFO_DIR}
 fi;
+
+if [ ! -d ${CONFIG_DIR} ]; then
+  mkdir -p ${CONFIG_DIR}
+  cp ${CONFIG_FILE} ${CONFIG_DIR}
+fi
+
 chown ${SERVICE_USER}:${SERVICE_USER} ${FIFO_DIR}
 
 echo Copying files...
