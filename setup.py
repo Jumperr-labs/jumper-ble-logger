@@ -1,3 +1,5 @@
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 from setuptools import setup, find_packages
 from setuptools.command.install import install
 from codecs import open
@@ -12,7 +14,10 @@ here = path.abspath(path.dirname(__file__))
 class InstallAgent(install):
     def run(self):
         install.run(self)
-        subprocess.check_call(['bash', './setup_service.sh'], stdout=subprocess.STDOUT)
+        result = subprocess.check_output(['bash', './setup_service.sh'])
+        print('Result of setup_service.sh:')
+        print(result)
+
 # Get the long description from the README file
 with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
