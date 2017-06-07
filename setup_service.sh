@@ -21,11 +21,10 @@ fi
 
 INSTALLATION_LOG=/tmp/jumper_ble_logger_installation.log
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-DEST_DIR=/etc/jumper_ble_logger
 FIFO_DIR=/var/run/jumper_ble_logger
 SERVICE_USER=jumperble
 SERVICE_NAME=jumper-ble
-CONFIG_DIR=/etc/jumper_logging_agent
+CONFIG_DIR=/etc/jumper_ble_logger
 CONFIG_FILE=config.json
 
 if id -u ${SERVICE_USER} >/dev/null 2>&1; then
@@ -36,18 +35,16 @@ else
 fi
 
 echo Creating directories...
-#rm -rf ${DEST_DIR}
-if [!-d ${DEST_DIR}]; then
-    mkdir -p ${DEST_DIR}
-fi;
-if [!-d ${FIFO_DIR}]; then
+if [ !-d ${FIFO_DIR} ]; then
     mkdir -p ${FIFO_DIR}
 fi;
 
 if [ ! -d ${CONFIG_DIR} ]; then
   mkdir -p ${CONFIG_DIR}
+fi;
+if [ ! -e "${CONFIG_DIR}/${CONFIG_FILE}" ]; then
   cp ${CONFIG_FILE} ${CONFIG_DIR}
-fi
+fi;
 
 chown ${SERVICE_USER}:${SERVICE_USER} ${FIFO_DIR}
 
@@ -55,11 +52,11 @@ echo Copying files...
 # Copying the agent to its final destination
 COPY_FILES="events_config.json"
 for FILE in ${COPY_FILES}; do
-    cp -R ${SCRIPT_DIR}/${FILE} ${DEST_DIR}/
+    cp -R ${SCRIPT_DIR}/${FILE} ${CONFIG_DIR}/
 done
 
-chown -R ${SERVICE_USER}:${SERVICE_USER} ${DEST_DIR}
-chmod -R u+rw,g+rw ${DEST_DIR}
+chown -R ${SERVICE_USER}:${SERVICE_USER} ${CONFIG_DIR}
+chmod -R u+rw,g+rw ${CONFIG_DIR}
 
 # Setup the jumper agent service
 echo Setting up service ${SERVICE_NAME}...
