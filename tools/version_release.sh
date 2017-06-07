@@ -2,7 +2,7 @@
 
 pushd `dirname ${BASH_SOURCE[0]}`/..
 
-version=`\grep version jumper_logging_agent/__init__.py | \egrep -o '[0-9]+\.[0-9]+\.[0-9]+'`
+version=`\grep version jumper_ble_logger/__init__.py | \egrep -o '[0-9]+\.[0-9]+\.[0-9]+'`
 echo "Found version: ${version}"
 
 if [ `git tag | grep ${version}` ] ; then
