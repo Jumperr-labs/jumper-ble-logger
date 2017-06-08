@@ -17,7 +17,7 @@ The BLE Logger is part of Jumper Insights- a full visibility platform for IoT sy
 ## Installation
  - Install prerequisits:
    - gatttool (Ubuntu: `sudo apt-get install bluez`)
-   - pip (Ubuntu: `sudo apt install python-pip`)
+   - pip (Ubuntu: `sudo apt install python-pip python-dev`)
    - libffi-dev and libssl-dev (Ubuntu: `sudo apt-get install libffi-dev libssl-dev`)
  - Install the logger: `sudo -H pip install jumper-ble-logger`
 
