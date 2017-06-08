@@ -3,3 +3,5 @@ include NOTICE
 include README.md
 include setup_service.sh
 include *.template
+include config.json
+include events_config.json
