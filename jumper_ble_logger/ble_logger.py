@@ -21,6 +21,7 @@ from . import gatt_protocol
 from .hci_channel_user_socket import create_bt_socket_hci_channel_user
 from .hci_protocol.hci_protocol import *
 from .event_parser_middleware import EventParser, EventParserException
+from . import __version__
 
 JUMPER_DATA_CHARACTERISTIC_UUID = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
 JUMPER_TIME_CHARACTERISTIC_UUID = int('8ff456790a294a73ab8db16ce0f1a2df', 16)
@@ -595,6 +596,8 @@ def main():
     logging.basicConfig(format='%(asctime)s %(levelname)8s %(name)10s: %(message)s', level=logging_level)
 
     logger = logging.getLogger(__file__)
+
+    logger.info('Jumper BLE Logger {}'.format(__version__))
 
     if args.log_file is not None:
         logger.addHandler(logging.FileHandler(args.log_file, mode='w'))

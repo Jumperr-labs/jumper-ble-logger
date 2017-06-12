@@ -6,7 +6,7 @@ from codecs import open
 from os import path
 import subprocess
 
-from jumper_ble_logger import version
+from jumper_ble_logger import __version__
 
 here = path.abspath(path.dirname(__file__))
 
@@ -24,7 +24,7 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 
 setup(
     name='jumper-ble-logger',
-    version=version,
+    version=__version__,
 
     cmdclass={'install': InstallAgent},
     description='Jumper GATT proxy for logging BLE traffic',
@@ -32,7 +32,7 @@ setup(
 
     # The project's main homepage.
     url='https://github.com/Jumperr-labs/jumper-ble-logger',
-    download_url='https://github.com/Jumperr-labs/jumper-ble-logger/archive/{}.tar.gz'.format(version),
+    download_url='https://github.com/Jumperr-labs/jumper-ble-logger/archive/{}.tar.gz'.format(__version__),
 
     # Author details
     author='Jumper Team',
