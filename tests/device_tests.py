@@ -49,14 +49,14 @@ class DeviceTests(unittest.TestCase):
             self.disconnect()
             raise
 
-        sleep(1000)
+        # sleep(1000)
 
     def test_sanity(self):
         print('connecting')
         self.gatt_device = hci_adapter.connect(TARGET_MAC_ADDRESS, timeout=10, address_type=BLEAddressType.random)
         print('connected')
         self.gatt_device.discover_characteristics()
-        sleep(3)
+        sleep(10)
 
     def test_reconnect(self):
         self.gatt_device = hci_adapter.connect(TARGET_MAC_ADDRESS, timeout=10, address_type=BLEAddressType.random)

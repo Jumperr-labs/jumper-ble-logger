@@ -179,6 +179,7 @@ class GattLogger(object):
     def __init__(self, logger=None):
         self._logger = logger or logging.getLogger(__name__)
         self._peripherals_loggers = dict()
+        self._connection_handle_to_mac_map = dict()
 
     def parse_hci_packet(self, packet):
         try:
@@ -246,6 +247,7 @@ This packet will be ignored by the logger',
             elif is_le_connection_complete_event(parsed_packet):
                 mac_address, connection_handle = get_meta_data_from_connection_complete_event_packet(parsed_packet)
                 self._logger.info('Connected to device. MAC: %s Connection handle: %d', mac_address, connection_handle)
+                self._connection_handle_to_mac_map[connection_handle] = mac_address
                 self._peripherals_loggers[connection_handle] = \
                     GattPeripheralLogger(mac_address, connection_handle, self._logger)
 
@@ -253,10 +255,16 @@ This packet will be ignored by the logger',
                 connection_handle = get_connection_handle_from_disconnection_complete_event_packet(parsed_packet)
                 log.info('Disconnection event on handle: {}'.format(connection_handle))
                 try:
+                    del self._connection_handle_to_mac_map[connection_handle]
+                except:
+                    self._logger.warning(
+                        'Received disconnection event for an unmapped connection handle: %d', connection_handle
+                    )
+                try:
                     del self._peripherals_loggers[connection_handle]
                 except KeyError:
                     self._logger.warning(
-                        'Received disconnection event for an unfamiliar connection handle: %d', connection_handle
+                        'Received disconnection event for a connection handle without a logger: %d', connection_handle
                     )
 
             return get_default_action(packet, source)
