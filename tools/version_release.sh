@@ -14,4 +14,4 @@ git tag ${version}
 git push --tags
 
 python setup.py register -r pypi
-python setup.py sdist upload -r pypit
+python setup.py sdist upload -r pypi
