@@ -15,14 +15,11 @@ import errno
 from datetime import datetime, timedelta
 import threading
 
-import signal
 from jumper_logging_agent.agent import \
     Agent, DEFAULT_FLUSH_PRIORITY, DEFAULT_FLUSH_INTERVAL, DEFAULT_FLUSH_THRESHOLD, DEFAULT_EVENT_TYPE
-
 from . import gatt_protocol
 from .hci_channel_user_socket import create_bt_socket_hci_channel_user
 from .hci_protocol.hci_protocol import *
-
 from .event_parser_middleware import EventParser, EventParserException
 
 JUMPER_DATA_CHARACTERISTIC_UUID = int('8ff456780a294a73ab8db16ce0f1a2df', 16)
@@ -188,99 +185,143 @@ class GattLogger(object):
             self._logger.error('Exception during packet parsing')
             return None
 
+    def handle_acl_data_packet(self, parsed_packet_with_raw_data, source):
+        connection_handle = get_connection_handle_from_acl_data_packet(parsed_packet_with_raw_data.value)
+        try:
+            mac_address = self._connection_handle_to_mac_map[connection_handle]
+        except KeyError:
+            self._logger.warning(
+                'Received ACL data packet for an unmapped connection handle: %d. \
+This packet will be ignored by the logger', connection_handle
+            )
+        else:
+            try:
+                peripheral_logger = self._peripherals_loggers[mac_address]
+            except KeyError:
+                self._logger.warning(
+                    'Received ACL data packet for a connection handle without a logger: %d. \
+This packet will be ignored by the logger', connection_handle
+                )
+            else:
+                return peripheral_logger.handle_message(parsed_packet_with_raw_data, source)
+
+    def handle_num_of_completed_packets_event(self, parsed_packet_with_raw_data, source):
+        parsed_packet = parsed_packet_with_raw_data.value
+        new_connection_handles = []
+        new_number_of_completed_packets = []
+
+        for i in range(parsed_packet.payload.payload.number_of_handles):
+            connection_handle = parsed_packet.payload.payload.connection_handles[i]
+            try:
+                mac_address = self._connection_handle_to_mac_map[connection_handle]
+            except KeyError:
+                pass
+            else:
+                if mac_address in self._peripherals_loggers:
+                    number_of_hidden_packets = \
+                        self._peripherals_loggers[mac_address].reset_number_of_hidden_data_packets_to_sockets()
+                    number_of_completed_packets = \
+                        parsed_packet.payload.payload.number_of_completed_packets[i] - number_of_hidden_packets
+                    if number_of_completed_packets != 0:
+                        new_connection_handles.append(connection_handle)
+                        new_number_of_completed_packets.append(number_of_completed_packets)
+
+        if len(new_connection_handles) > 0:
+            new_packet = build_number_of_completed_packets_event_packet(
+                new_connection_handles, new_number_of_completed_packets
+            )
+
+            return Action(
+                packets_to_send_to_socket=[],
+                packets_to_send_to_pty=[new_packet],
+                data_to_send_to_agent=None
+            )
+
+    def hadle_command_status_event(self, parsed_packet_with_raw_data, source):
+        block_packet = False
+        for peripheral_logger in self._peripherals_loggers:
+            if peripheral_logger.awaiting_response:
+                block_packet = True
+                break
+        if block_packet:
+            return Action(
+                packets_to_send_to_socket=[],
+                packets_to_send_to_pty=[],
+                data_to_send_to_agent=None
+            )
+
+    def handle_le_connection_complete_event(self, parsed_packet_with_raw_data, source):
+        parsed_packet = parsed_packet_with_raw_data.value
+        mac_address, connection_handle = get_meta_data_from_connection_complete_event_packet(parsed_packet)
+        self._logger.info('Connected to device. MAC: %s Connection handle: %d', mac_address, connection_handle)
+        self._connection_handle_to_mac_map[connection_handle] = mac_address
+
+        if mac_address not in self._peripherals_loggers:
+            self._peripherals_loggers[mac_address] = \
+                GattPeripheralLogger(mac_address, self._logger)
+
+        self._peripherals_loggers[mac_address].on_connect(connection_handle)
+
+        return None
+
+    def handle_disconnection_complete_event(self, parsed_packet_with_raw_data, source):
+        parsed_packet = parsed_packet_with_raw_data.value
+        connection_handle = get_connection_handle_from_disconnection_complete_event_packet(parsed_packet)
+        log.info('Disconnection event on handle: {}'.format(connection_handle))
+        try:
+            mac_address = self._connection_handle_to_mac_map[connection_handle]
+        except KeyError:
+            self._logger.warning(
+                'Received disconnection event for an unmapped connection handle: %d', connection_handle
+            )
+            return None
+
+        del self._connection_handle_to_mac_map[connection_handle]
+
+        try:
+            self._peripherals_loggers[mac_address].on_disconnect()
+        except KeyError:
+            self._logger.warning(
+                'Received disconnection event for a connection handle without a logger: %d', connection_handle
+            )
+        return None
+
     def handle_message(self, packet, source):
         parsed_packet_with_raw_data = self.parse_hci_packet(packet)
+        action = None
 
         if parsed_packet_with_raw_data is not None:
             parsed_packet = parsed_packet_with_raw_data.value
 
             if is_acl_data_packet(parsed_packet):
-                connection_handle = get_connection_handle_from_acl_data_packet(parsed_packet)
-                if connection_handle in self._peripherals_loggers:
-                    peripheral_logger = self._peripherals_loggers[connection_handle]
-                    return peripheral_logger.handle_message(parsed_packet_with_raw_data, source)
-                else:
-                    self._logger.warning(
-                        'Received ACL data packet for an unfamiliar connection handle: %d. \
-This packet will be ignored by the logger',
-                        connection_handle
-                    )
+                action = None or self.handle_acl_data_packet(parsed_packet_with_raw_data, source)
 
             elif is_num_of_completed_packets_event(parsed_packet) and source == 'socket':
-                new_connection_handles = []
-                new_number_of_completed_packets = []
-
-                for i in range(parsed_packet.payload.payload.number_of_handles):
-                    connection_handle = parsed_packet.payload.payload.connection_handles[i]
-                    if connection_handle in self._peripherals_loggers:
-                        number_of_hidden_packets = \
-                            self._peripherals_loggers[connection_handle].reset_number_of_hidden_data_packets_to_sockets()
-                        number_of_completed_packets = parsed_packet.payload.payload.number_of_completed_packets[i] - \
-                            number_of_hidden_packets
-                        if number_of_completed_packets != 0:
-                            new_connection_handles.append(connection_handle)
-                            new_number_of_completed_packets.append(number_of_completed_packets)
-                if len(new_connection_handles) > 0:
-                    new_packet = build_number_of_completed_packets_event_packet(
-                        new_connection_handles, new_number_of_completed_packets
-                    )
-
-                    return Action(
-                        packets_to_send_to_socket=[],
-                        packets_to_send_to_pty=[new_packet],
-                        data_to_send_to_agent=None
-                    )
+                action = None or self.handle_num_of_completed_packets_event(parsed_packet_with_raw_data, source)
 
             elif is_command_status_packet(parsed_packet):
-                block_packet = False
-                for peripheral_logger in self._peripherals_loggers:
-                    if peripheral_logger.awaiting_response:
-                        block_packet = True
-                        break
-                if block_packet:
-                    return Action(
-                        packets_to_send_to_socket=[],
-                        packets_to_send_to_pty=[],
-                        data_to_send_to_agent=None
-                    )
+                action = None or self.hadle_command_status_event(parsed_packet_with_raw_data, source)
 
             elif is_le_connection_complete_event(parsed_packet):
-                mac_address, connection_handle = get_meta_data_from_connection_complete_event_packet(parsed_packet)
-                self._logger.info('Connected to device. MAC: %s Connection handle: %d', mac_address, connection_handle)
-                self._connection_handle_to_mac_map[connection_handle] = mac_address
-                self._peripherals_loggers[connection_handle] = \
-                    GattPeripheralLogger(mac_address, connection_handle, self._logger)
+                action = None or self.handle_le_connection_complete_event(parsed_packet_with_raw_data, source)
 
             elif is_le_disconnection_complete_event(parsed_packet) or is_disconnection_complete_event(parsed_packet):
-                connection_handle = get_connection_handle_from_disconnection_complete_event_packet(parsed_packet)
-                log.info('Disconnection event on handle: {}'.format(connection_handle))
-                try:
-                    del self._connection_handle_to_mac_map[connection_handle]
-                except:
-                    self._logger.warning(
-                        'Received disconnection event for an unmapped connection handle: %d', connection_handle
-                    )
-                try:
-                    del self._peripherals_loggers[connection_handle]
-                except KeyError:
-                    self._logger.warning(
-                        'Received disconnection event for a connection handle without a logger: %d', connection_handle
-                    )
+                action = None or self.handle_disconnection_complete_event(parsed_packet_with_raw_data, source)
 
-            return get_default_action(packet, source)
+        return action or get_default_action(packet, source)
 
 
 class GattPeripheralLogger(object):
-    def __init__(self, mac_address, connection_handle, logger=None):
+    def __init__(self, mac_address, logger=None):
         self._logger = logger or logging.getLogger(__name__)
         self._mac_address = mac_address
-        self._connection_handle = connection_handle
+        self._connection_handle = None
         self._jumper_data_handle = None
         self._jumper_time_handle = None
         self.awaiting_response = False
         self._queued_pty_packets = []
         self._number_of_hidden_data_packets_to_socket = 0
-        self._state = 'INIT'
+        self._state = None
         self._boot_time = None
 
     def reset_number_of_hidden_data_packets_to_sockets(self):
@@ -301,6 +342,17 @@ class GattPeripheralLogger(object):
             packets_to_send_to_pty=[packet],
             data_to_send_to_agent=None
         )
+
+    def on_connect(self, connection_handle):
+        self._connection_handle = connection_handle
+        self._jumper_data_handle = None
+        self._jumper_time_handle = None
+        self.awaiting_response = False
+        self._state = 'INIT'
+        self._boot_time = None
+
+    def on_disconnect(self):
+        self._state = 'DISCONNECTED'
 
     def handle_message(self, parsed_packet_with_raw_data, source):
         parsed_packet = parsed_packet_with_raw_data.value
@@ -323,7 +375,7 @@ class GattPeripheralLogger(object):
         elif self._state == 'TIME_SYNC':
             if source == 'socket' and is_read_response_packet(parsed_packet):
                 self._boot_time = \
-                    datetime.utcnow() - timedelta(0,get_value_from_read_response_packet(parsed_packet))
+                    datetime.utcnow() - timedelta(0, get_value_from_read_response_packet(parsed_packet))
 
                 self._state = 'STARTING_NOTIFICATIONS'
                 self._logger.debug('State = %s', self._state)
@@ -369,6 +421,9 @@ class GattPeripheralLogger(object):
                 return Action(
                     packets_to_send_to_socket=[], packets_to_send_to_pty=[], data_to_send_to_agent=data_to_send_to_agent
                 )
+
+        elif self._state == 'DISCONNECTED':
+            log.warning('Received packet while disconnected: %s', parsed_packet)
 
         return get_default_action(packet, source)
 
@@ -516,7 +571,7 @@ def main():
         '--events-config-file',
         type=str,
         help='Path of the events config file in JSON format.',
-        default = '/etc/jumper_ble_logger/events_config.json'
+        default='/etc/jumper_ble_logger/events_config.json'
     )
     parser.add_argument(
         '--config-file',
@@ -543,7 +598,6 @@ def main():
 
     if args.log_file is not None:
         logger.addHandler(logging.FileHandler(args.log_file, mode='w'))
-
 
     if not os.path.isfile(args.config_file):
         print('Config file is missing: {}'.format(args.config_file))
@@ -594,9 +648,6 @@ def main():
         on_listening=on_listening,
         dev_mode=args.dev_mode
     )
-
-    # signal.signal(signal.SIGTERM, lambda *a: agent.stop())
-    # signal.signal(signal.SIGINT, lambda *a: agent.stop())
 
     atexit.register(agent.cleanup)
 
