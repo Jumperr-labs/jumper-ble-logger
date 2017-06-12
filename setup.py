@@ -67,6 +67,9 @@ setup(
     # simple. Or you can use find_packages().
     packages=find_packages(exclude=['tests']),
     install_requires=['construct', 'jumper-logging-agent'],
+    extras_require={
+        'dev': ['ipython', 'nose', 'pygatt']
+    },
     # To provide executable scripts, use entry points in preference to the
     # "scripts" keyword. Entry points provide cross-platform support and allow
     # pip to create the appropriate form of executable for the target platform.

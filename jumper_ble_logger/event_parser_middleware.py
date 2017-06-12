@@ -26,7 +26,7 @@ class EventParser(object):
                 Error parsing event {} from events_config.json . An event can have either strings or data, not both.
                 """.format(k))
 
-    def parse(self, mac_address, data, time_offset):
+    def parse(self, mac_address, data, boot_time):
         if len(data) < self.LOGGER_EVENT_HEADER_LENGTH:
             raise EventParserException('Data header too short: {}'.format(repr(data)))
 
@@ -43,14 +43,14 @@ class EventParser(object):
         else:
             type = event_config['type']
 
-        timestamp = time_offset + timedelta(seconds=time_from_boot)
+        timestamp = boot_time + timedelta(seconds=time_from_boot)
         event_dict = dict(
             type=type,
             timestamp=timestamp.isoformat() + 'Z',
             device_id=mac_address
         )
 
-        print(time_offset + timedelta(seconds=time_from_boot))
+        self._logger.debug('timestamp: {}'.format(boot_time + timedelta(seconds=time_from_boot)))
 
         if event_config:
             if event_config.get('data'):

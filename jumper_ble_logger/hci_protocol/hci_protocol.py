@@ -187,6 +187,9 @@ AttCommandPacket = "att_command_packet" / Struct(
 
 L2CapPacket = "l2cap_packet" / Struct(
     "length" / Int16ul,
+    # "length" / Switch(this.cid, {
+    #     ATT_CID: Rebuild(Int16ul, lambda x: AttCommandPacket.sizeof(x.payload))
+    # }, default=Int16ul),
     "cid" / Int16ul,
     "payload" / Switch(this.cid, {
         ATT_CID: AttCommandPacket
@@ -357,7 +360,12 @@ HciEventPacket = "hci_event_packet" / Struct(
                    LE_META_EVENT=0x3E,
                    default=Pass
                    ),
-    "length" / Rebuild(Int8ul, lambda x: NumberOfCompletedPacketsEvent.sizeof(x.payload)),
+    "length" / Switch(this.event,
+                      {
+                          "NUMBER_OF_COMPLETED_PACKETS": Rebuild(Int8ul, lambda x: NumberOfCompletedPacketsEvent.sizeof(x.payload)),
+                          "LE_META_EVENT": Rebuild(Int8ul, lambda x: LeMetaEvent.sizeof(x.payload)),
+                      }, default=Int8ul
+                      ),
     "payload" / Switch(this.event,
                        {
                            "DISCONNECTION_COMPLETE": DisconnectEvent,

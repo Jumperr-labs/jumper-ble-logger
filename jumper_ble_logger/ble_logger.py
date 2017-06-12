@@ -30,7 +30,7 @@ JUMPER_TIME_CHARACTERISTIC_UUID = int('8ff456790a294a73ab8db16ce0f1a2df', 16)
 
 DEFAULT_INPUT_FILENAME = '/var/run/jumper_ble_logger/events'
 
-DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload time_offset')
+DataToSendToAgent = collections.namedtuple('DataToSendToAgent', 'mac_address payload boot_time')
 
 
 class AgentEventsSender(object):
@@ -41,6 +41,10 @@ class AgentEventsSender(object):
 
     @staticmethod
     def open_fifo_readwrite(filename):
+        if not os.path.exists(filename):
+            dirname = os.path.dirname(filename)
+            if not os.path.exists(dirname):
+                os.makedirs(dirname)
         try:
             os.mkfifo(filename)
         except OSError as e:
@@ -59,10 +63,10 @@ class AgentEventsSender(object):
 
 
 class HciProxy(object):
-    def __init__(self, hci_device_number=0, logger=None, config=None):
+    def __init__(self, hci_device_number=0, logger=None, events_config=None):
         self._logger = logger or logging.getLogger(__name__)
 
-        self._event_parser = EventParser(config=config, logger=self._logger)
+        self._event_parser = EventParser(config=events_config, logger=self._logger)
         self._agent_events_sender = AgentEventsSender(logger=self._logger)
 
         self._hci_device_number = hci_device_number
@@ -88,6 +92,7 @@ class HciProxy(object):
 
         self._pty_buffer = StringIO()  # Used as a seekable stream
         self._gatt_logger = GattLogger(self._logger)
+        self._should_stop = False
 
     @property
     def hci_device_name(self):
@@ -118,7 +123,7 @@ class HciProxy(object):
                 parsed_data = self._event_parser.parse(
                     action.data_to_send_to_agent.mac_address,
                     action.data_to_send_to_agent.payload,
-                    action.data_to_send_to_agent.time_offset
+                    action.data_to_send_to_agent.boot_time
                 )
             except EventParserException as e:
                 self._logger.warning('Error parsing packet from BLE device: %s', e)
@@ -126,32 +131,37 @@ class HciProxy(object):
                 self._agent_events_sender.send_data(parsed_data)
 
     def run(self):
-        while True:
-            readable, _, _ = select.select(self._inputs, [], [])
+        try:
+            while not self._should_stop:
+                readable, _, _ = select.select(self._inputs, [], [], 1)
 
-            if self._hci_socket in readable:
-                source = 'socket'
-                packet = self._hci_socket.recv(4096)
-                self._logger.debug('SOCKET: %s', RawCopy(HciPacket).parse(packet))
-                self.handle_packet(packet, source)
-
-            if self._pty_fd in readable:
-                data = os.read(self._pty_master, 4096)
-                self._logger.debug('Raw PTY data: %s', repr(data))
-                self._pty_buffer.write(data)
-                self._pty_buffer.seek(-len(data), SEEK_CUR)
-
-                source = 'pty'
-                while True:
-                    if self._pty_buffer.pos == self._pty_buffer.len:
-                        break
-                    parsed_packet = RawCopy(HciPacket).parse_stream(self._pty_buffer)
-                    if not parsed_packet:
-                        break
-                    self._logger.debug('PTY: %s', parsed_packet)
-                    packet = parsed_packet.data
+                if self._hci_socket in readable:
+                    source = 'socket'
+                    packet = self._hci_socket.recv(4096)
+                    self._logger.debug('SOCKET: %s', RawCopy(HciPacket).parse(packet))
                     self.handle_packet(packet, source)
 
+                if self._pty_fd in readable:
+                    data = os.read(self._pty_master, 4096)
+                    self._logger.debug('Raw PTY data: %s', repr(data))
+                    self._pty_buffer.write(data)
+                    self._pty_buffer.seek(-len(data), SEEK_CUR)
+
+                    source = 'pty'
+                    while True:
+                        if self._pty_buffer.pos == self._pty_buffer.len:
+                            break
+                        parsed_packet = RawCopy(HciPacket).parse_stream(self._pty_buffer)
+                        if not parsed_packet:
+                            break
+                        self._logger.debug('PTY: %s', parsed_packet)
+                        packet = parsed_packet.data
+                        self.handle_packet(packet, source)
+        except KeyboardInterrupt:
+            log.info("Received SIGTERM, exiting")
+
+    def stop(self):
+        self._should_stop = True
 
 Action = collections.namedtuple(
     'Action', 'packets_to_send_to_socket packets_to_send_to_pty data_to_send_to_agent'
@@ -239,8 +249,9 @@ This packet will be ignored by the logger',
                 self._peripherals_loggers[connection_handle] = \
                     GattPeripheralLogger(mac_address, connection_handle, self._logger)
 
-            elif is_le_disconnection_complete_event(parsed_packet):
+            elif is_le_disconnection_complete_event(parsed_packet) or is_disconnection_complete_event(parsed_packet):
                 connection_handle = get_connection_handle_from_disconnection_complete_event_packet(parsed_packet)
+                log.info('Disconnection event on handle: {}'.format(connection_handle))
                 try:
                     del self._peripherals_loggers[connection_handle]
                 except KeyError:
@@ -262,12 +273,26 @@ class GattPeripheralLogger(object):
         self._queued_pty_packets = []
         self._number_of_hidden_data_packets_to_socket = 0
         self._state = 'INIT'
-        self._time_offset = None
+        self._boot_time = None
 
     def reset_number_of_hidden_data_packets_to_sockets(self):
         result = self._number_of_hidden_data_packets_to_socket
         self._number_of_hidden_data_packets_to_socket = 0
         return result
+
+    def start_time_sync(self, packet):
+        self._state = 'TIME_SYNC'
+        self._logger.debug('State = %s', self._state)
+        self._number_of_hidden_data_packets_to_socket = self._number_of_hidden_data_packets_to_socket + 1
+        self.awaiting_response = True
+        self._logger.debug('Sending request for "time from boot"')
+        return Action(
+            packets_to_send_to_socket=[gatt_protocol.create_read_request_packet(
+                self._connection_handle, self._jumper_time_handle
+            )],
+            packets_to_send_to_pty=[packet],
+            data_to_send_to_agent=None
+        )
 
     def handle_message(self, parsed_packet_with_raw_data, source):
         parsed_packet = parsed_packet_with_raw_data.value
@@ -285,22 +310,12 @@ class GattPeripheralLogger(object):
                     find_handle_in_read_by_type_response_packet(parsed_packet, JUMPER_TIME_CHARACTERISTIC_UUID)
 
                 if self._jumper_data_handle and self._jumper_time_handle:
-                    self._state = 'TIME_SYNC'
-                    self._logger.debug('State = %s', self._state)
-                    self._number_of_hidden_data_packets_to_socket = self._number_of_hidden_data_packets_to_socket + 1
-                    self.awaiting_response = True
-                    return Action(
-                        packets_to_send_to_socket=[gatt_protocol.create_read_request_packet(
-                            self._connection_handle, self._jumper_time_handle
-                        )],
-                        packets_to_send_to_pty=[packet],
-                        data_to_send_to_agent=None
-                    )
+                    return self.start_time_sync(packet)
 
         elif self._state == 'TIME_SYNC':
             if source == 'socket' and is_read_response_packet(parsed_packet):
-                self._time_offset = \
-                    - timedelta(0,get_value_from_read_response_packet(parsed_packet)) + datetime.utcnow()
+                self._boot_time = \
+                    datetime.utcnow() - timedelta(0,get_value_from_read_response_packet(parsed_packet))
 
                 self._state = 'STARTING_NOTIFICATIONS'
                 self._logger.debug('State = %s', self._state)
@@ -340,7 +355,7 @@ class GattPeripheralLogger(object):
                 data_to_send_to_agent = DataToSendToAgent(
                     mac_address=self._mac_address,
                     payload=get_data_from_notify_message(parsed_packet),
-                    time_offset=self._time_offset
+                    boot_time=self._boot_time
                 )
                 self._logger.info('Received data from logger: %s', repr(data_to_send_to_agent))
                 return Action(
@@ -415,6 +430,11 @@ def get_meta_data_from_connection_complete_event_packet(parsed_packet):
 def is_le_disconnection_complete_event(parsed_packet):
     return parsed_packet.type == 'EVENT_PACKET' and \
            parsed_packet.payload.event == 'DISCONNECTION_COMPLETED'
+
+
+def is_disconnection_complete_event(parsed_packet):
+    return parsed_packet.type == 'EVENT_PACKET' and \
+           parsed_packet.payload.event == 'DISCONNECTION_COMPLETE'
 
 
 def get_connection_handle_from_disconnection_complete_event_packet(parsed_packet):
