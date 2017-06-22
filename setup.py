@@ -66,7 +66,7 @@ setup(
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().
     packages=find_packages(exclude=['tests']),
-    install_requires=['construct', 'jumper-logging-agent'],
+    install_requires=['hci-protocol', 'jumper-logging-agent'],
     extras_require={
         'dev': ['ipython', 'nose', 'pygatt']
     },

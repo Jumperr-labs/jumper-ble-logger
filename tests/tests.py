@@ -6,8 +6,8 @@ import json
 from datetime import datetime
 from jumper_ble_logger.event_parser_middleware import EventParser
 from jumper_ble_logger.ble_logger import change_dictionary_keys_from_str_to_int, GattPeripheralLogger
-from jumper_ble_logger.hci_protocol.hci_functions import *
-from jumper_ble_logger.hci_protocol.hci_protocol import *
+from hci_protocol.hci_functions import *
+from hci_protocol.hci_protocol import *
 
 ROOT_DIR = os.path.join(os.path.dirname(__file__), '..')
 VALID_CONFIG_FILE = os.path.join(ROOT_DIR, 'events_config.json')

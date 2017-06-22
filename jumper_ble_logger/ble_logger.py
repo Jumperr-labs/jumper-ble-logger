@@ -19,7 +19,7 @@ from jumper_logging_agent.agent import \
     Agent, DEFAULT_FLUSH_PRIORITY, DEFAULT_FLUSH_INTERVAL, DEFAULT_FLUSH_THRESHOLD, DEFAULT_EVENT_TYPE
 from . import gatt_protocol
 from .hci_channel_user_socket import create_bt_socket_hci_channel_user
-from .hci_protocol.hci_protocol import *
+from hci_protocol.hci_protocol import *
 from .event_parser_middleware import EventParser, EventParserException
 from . import __version__
 
