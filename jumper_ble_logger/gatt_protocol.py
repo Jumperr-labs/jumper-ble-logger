@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 from hci_protocol.hci_protocol import *
 
-NOTIFY_ON = 1
+NOTIFY_ON = b'\x01\x00'
 
 
 def parse_characteristic_declaration(value):
@@ -19,10 +19,10 @@ def parse_characteristic_declaration(value):
 
 
 def create_start_notifying_on_handle_packet(connection_handle, handle):
-    return create_write_request_packet(connection_handle, handle + 1, NOTIFY_ON, 2)
+    return create_write_request_packet(connection_handle, handle + 1, NOTIFY_ON)
 
 
-def create_write_request_packet(connection_handle, handle, data, num_bytes_for_data):
+def create_write_request_packet(connection_handle, handle, data):
     return HciPacket.build(
         dict(
             type='ACL_DATA_PACKET',
@@ -30,7 +30,7 @@ def create_write_request_packet(connection_handle, handle, data, num_bytes_for_d
                 flags=0,
                 handle=connection_handle,
                 payload=dict(
-                    length=3 + num_bytes_for_data,
+                    length=3 + len(data),
                     cid=ATT_CID,
                     payload=dict(
                         opcode='ATT_OP_WRITE_REQUEST',
